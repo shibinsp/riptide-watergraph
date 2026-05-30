@@ -214,7 +214,15 @@ def _show_costs() -> int:
 
 
 def _run_eval(offline: bool) -> int:
-    report = EvalRunner(offline=offline).run()
+    try:
+        report = EvalRunner(offline=offline).run()
+    except Exception as exc:  # noqa: BLE001 - surface a friendly hint for real runs
+        if not offline:
+            print(f" real-model eval failed: {exc}")
+            print(' hint: pip install -e ".[litellm]", set OPENAI_API_KEY and '
+                  "AGENTIC_WATER_MODEL, or use --offline.")
+            return 1
+        raise
     print(f"{'task':<14}{'pass':>6}{'mode':>10}{'tool_valid':>12}  notes")
     print("-" * 60)
     for r in report.results:

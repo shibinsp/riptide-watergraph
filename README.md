@@ -71,6 +71,12 @@ riptide run "..." --offline --no-guardrails                # opt out for a run
 # Evaluation suite (behavioral regression gate; runs in CI)
 riptide eval --offline
 
+# Serve over HTTP (needs the [server] extra: pip install -e ".[server]")
+riptide serve --port 8000
+#   POST /run {"task": "...", "offline": true}      -> structured result
+#   GET  /run/stream?task=...                        -> Server-Sent Events
+#   POST /sessions/{id}/messages {"task": "..."}     -> multi-turn (keeps context)
+
 # 4. Use a real model (installs the LiteLLM gateway + tracing extras)
 pip install -e ".[all]"
 cp .env.example .env             # fill OPENAI_API_KEY / model + (optional) Langfuse keys
@@ -181,6 +187,7 @@ real model with `EvalRunner(offline=False)`. See
 - **Production hardening ✅** — `ResilientGateway` (timeouts + retry/backoff), tool-error isolation (a failing tool can't crash a run), real token-usage cost accounting with a model price table, path-traversal/arg-validation security fixes, and CI lint + type-check + coverage.
 - **Memory quality ✅** — real hybrid retrieval (dense embeddings + BM25 fused by RRF) with reranking, episodic trajectory storage, a lesson quality gate, and `consolidate()` (near-duplicate merge + failed-lesson decay).
 - **Smarter orchestration ✅** — LLM-driven composer (subtasks + dependencies), dependency-ordered wave execution with a shared blackboard, and per-role model routing (planner vs worker).
+- **Serve as a product ✅** — FastAPI service (`riptide serve`) with `POST /run`, SSE `/run/stream`, multi-turn session endpoints, and per-tenant budget enforcement (HTTP 402 when a tenant is over its ceiling).
 - **Optional infra seams** — swap `SqliteSaver` → Temporal for multi-day durable workflows; `JsonFileMemory` → pgvector and the gateway → vLLM/SGLang at scale; add LlamaFirewall / NeMo Guardrails alongside the built-in checks.
 
 ## License

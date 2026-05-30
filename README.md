@@ -2,10 +2,11 @@
 
 A reusable, enterprise-grade multi-agent framework — conceptually *like AutoGen*, but built as a **thin layer on [LangGraph](https://github.com/langchain-ai/langgraph)** rather than re-authoring the orchestration runtime. The design goal is to be **"like water"**: a layered, modular substrate where every layer is swappable behind a thin interface.
 
-> **Stage 1 (this repo): a runnable walking skeleton.** It proves the whole spine works end-to-end —
-> orchestrator decomposes a task → worker calls a tool → human-approval interrupt → resume → finalize, with tracing.
-> The three differentiator layers (self-learning **memory**, dynamic **swarm composer**, **tool registry**) ship as
-> interface-stubbed seams to be filled in Stages 2–4.
+> **Stages 1–2 implemented.** Stage 1: the runnable spine — orchestrator decomposes a task → worker calls a
+> tool → human-approval interrupt → resume → finalize, with tracing. **Stage 2: memory + self-learning** —
+> a `recall` step injects relevant past lessons into prompts, and a `reflect` step distills new lessons into
+> persistent memory after each run. The remaining differentiators (dynamic **swarm composer**, on-demand
+> **tool registry**) are interface-stubbed seams for Stages 3–4.
 
 ## Why this shape
 
@@ -24,7 +25,7 @@ Pure Python, one toolchain. The retrieval-ranking core (**BM25** lexical scoring
 | Model gateway | `LiteLLMGateway` (API-first, OpenAI-compatible) | local vLLM endpoint |
 | Agent core | thin `Agent` over the gateway | typed agent core |
 | Orchestration | LangGraph orchestrator-worker graph + `SqliteSaver` | richer graphs |
-| Memory | `InMemoryMemory` using a BM25+RRF hybrid ranker; `reflect()` stubbed | Letta/Mem0 + pgvector + reflection loop |
+| Memory | `JsonFileMemory` (persistent) + `LLMReflector`; BM25+RRF recall, distilled lessons | Letta/Mem0 + pgvector at scale |
 | Swarm composer | `SingleAgentComposer` (cost-aware gate stubbed) | runtime team formation |
 | Tool registry | `StaticToolRegistry`; MCP seam noted | versioned + on-demand retrieval |
 | HITL | LangGraph `interrupt()` approval gate | escalation queues |
@@ -46,6 +47,11 @@ pytest                           # graph e2e + ranking + tool-call gate
 riptide-watergraph run "Save a note about water" --offline --auto-approve
 riptide-watergraph run "What is 21 * 2?" --offline      # read-only: no interrupt
 
+# Self-learning: run the same task twice — the 2nd run recalls the lesson the 1st stored.
+riptide run "compute 21 * 2" --offline      # learns a lesson
+riptide run "compute 21 * 2" --offline      # "recalled 1 lesson(s): ..."
+riptide run "compute 21 * 2" --offline --no-memory   # disable recall + reflection
+
 # 4. Use a real model (installs the LiteLLM gateway + tracing extras)
 pip install -e ".[all]"
 cp .env.example .env             # fill OPENAI_API_KEY / model + (optional) Langfuse keys
@@ -58,22 +64,33 @@ riptide-watergraph run "Summarize and save a note about water"   # drop --offlin
 Riptide-Watergraph/
 ├── pyproject.toml               # setuptools build, src layout
 └── src/riptide_watergraph/
-    ├── interfaces/              # ABCs = the swappable seams
+    ├── interfaces/              # ABCs = the swappable seams (incl. Reflector)
     ├── gateway/                 # LiteLLMGateway + DemoGateway (offline)
-    ├── memory/                  # InMemoryMemory + BM25/RRF hybrid ranking
+    ├── memory/                  # JsonFileMemory, ranking, reflection, types
     ├── tools/                   # StaticToolRegistry + example tools
     ├── swarm/                   # SingleAgentComposer (stub)
-    ├── graph/                   # state, nodes, builder (LangGraph)
+    ├── graph/                   # state, nodes (recall/reflect), builder (LangGraph)
     ├── observability/           # OTEL + Langfuse tracing
     ├── config.py                # pydantic-settings
     └── cli.py                   # `riptide-watergraph run`
 ```
 
+## Self-learning loop (Stage 2)
+
+After each task the graph runs a **`reflect`** step: it judges success/failure, asks the
+model to distill one reusable lesson, and writes it to persistent memory (`JsonFileMemory`,
+deduped by content hash, capped to bound growth). At the start of the next task a **`recall`**
+step retrieves the most relevant lessons (BM25 + RRF) and injects them into the orchestrator
+and worker prompts. Over repeated runs the lesson store grows and is reused — improvement
+**without any fine-tuning** (the Reflexion / ReasoningBank pattern). See
+[`test_self_learning.py`](tests/test_self_learning.py) for a deterministic proof that success
+rises across runs purely from recall + reflection.
+
 ## Roadmap
 
-- **Stage 2** — memory + reflection (the self-learning proof: success rate rises over repeated runs as the lesson store grows); swap `InMemoryMemory` → pgvector.
+- **Stage 2 ✅** — memory + reflection: persistent lessons, recall-injection, end-of-task reflection (done).
 - **Stage 3** — dynamic swarm composer + tool registry with on-demand retrieval (must beat single-agent *net of token cost*).
-- **Stage 4** — guardrails, multi-tenancy, per-tenant cost dashboards, optional Temporal + SGLang.
+- **Stage 4** — guardrails, multi-tenancy, per-tenant cost dashboards, optional Temporal + SGLang; swap `JsonFileMemory` → pgvector at scale.
 
 ## License
 

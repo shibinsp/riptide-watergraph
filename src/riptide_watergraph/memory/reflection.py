@@ -75,5 +75,6 @@ def _parse_lesson(content: str | None, task: str) -> tuple[str, list[str]]:
             return str(parsed["lesson"]).strip(), [str(t) for t in tags]
     except json.JSONDecodeError:
         pass
-    # Fallback: treat the whole reply as the lesson.
-    return text, []
+    # Quality gate: a non-JSON / lesson-less reply yields NO lesson, rather than
+    # storing arbitrary prose that would pollute the memory store.
+    return "", []

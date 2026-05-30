@@ -202,9 +202,12 @@ See [`mcp/`](src/riptide_watergraph/mcp) and [`test_mcp.py`](tests/test_mcp.py).
 The research consensus is to **run your own evals** rather than trust vendor benchmarks.
 `riptide eval --offline` runs a deterministic task suite through the full graph and scores
 pass rate, single-vs-swarm routing, guardrail blocking, tool-call validity, and a
-self-learning recall probe — so behavior is measurable and regressions fail CI. Swap to a
-real model with `EvalRunner(offline=False)`. See
+self-learning recall probe — so behavior is measurable and regressions fail CI. See
 [`evaluation/`](src/riptide_watergraph/evaluation) and [`test_evaluation.py`](tests/test_evaluation.py).
+
+**Against a real model:** `pip install -e ".[litellm]"`, set `OPENAI_API_KEY` and
+`AGENTIC_WATER_MODEL`, then `riptide eval` (no `--offline`) or `python examples/real_model_eval.py`.
+The runner uses the configured model wrapped in `ResilientGateway` (timeouts + retries).
 
 ## Roadmap
 

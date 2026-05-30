@@ -46,6 +46,12 @@ class OrchestratorState(TypedDict, total=False):
     dependencies: list[list[int]]  # dependencies[i] = prerequisite subtask indices
     blackboard: dict[int, str]  # subtask index -> output, shared across waves
 
+    # --- Multi-agent enhancement (roles / critic / supervisor / handoff) ---
+    roles: list[str]  # role name per subtask (parallel to plan)
+    verdicts: list[dict[str, Any]]  # critic verdict per result
+    round: int  # supervisor re-planning round counter
+    handoffs: dict[int, int]  # subtask index -> handoff count (cap enforcement)
+
     # --- Stage 4: guardrails + multi-tenancy ---
     tenant_id: str  # tenant this run belongs to (isolation + cost attribution)
     blocked: bool  # set by guard_input when the request is refused

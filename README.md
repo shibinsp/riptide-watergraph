@@ -121,9 +121,15 @@ otherwise it stays a **single** agent — avoiding the multi-agent token multipl
 wouldn't benefit. In swarm mode, subtasks run concurrently (`asyncio.gather`). The decision
 carries both the chosen-mode and single-agent cost so the trade-off is visible. The **tool
 registry** retrieves only the top-k relevant tools per subtask (BM25), keeping schemas out of
-context, and supports versioned tools (`get`/`list_versions`). See
-[`test_swarm_composer.py`](tests/test_swarm_composer.py) and
-[`test_swarm_execution.py`](tests/test_swarm_execution.py).
+context, and supports versioned tools (`get`/`list_versions`).
+
+**Phase C deepens this:** an `LLMSwarmComposer` (`--llm-composer`) asks the model to decompose
+the task into subtasks **with dependencies**, instead of the heuristic regex split.
+Execution is then **dependency-ordered waves** — independent subtasks run in parallel within
+a wave, dependent ones run after, and a shared **blackboard** carries each subtask's output to
+its dependents' prompts. **Model routing** (`planner_model` / `worker_model`) lets the
+orchestrator/finalize use a premium model while workers use a cheaper one. See
+[`test_orchestration.py`](tests/test_orchestration.py) and [`test_waves.py`](tests/test_waves.py).
 
 ## Production hardening (Stage 4)
 
@@ -174,6 +180,7 @@ real model with `EvalRunner(offline=False)`. See
 - **MCP tool interop ✅** — external MCP-server tools register into the registry and run like local tools (`[mcp]` extra for the stdio transport).
 - **Production hardening ✅** — `ResilientGateway` (timeouts + retry/backoff), tool-error isolation (a failing tool can't crash a run), real token-usage cost accounting with a model price table, path-traversal/arg-validation security fixes, and CI lint + type-check + coverage.
 - **Memory quality ✅** — real hybrid retrieval (dense embeddings + BM25 fused by RRF) with reranking, episodic trajectory storage, a lesson quality gate, and `consolidate()` (near-duplicate merge + failed-lesson decay).
+- **Smarter orchestration ✅** — LLM-driven composer (subtasks + dependencies), dependency-ordered wave execution with a shared blackboard, and per-role model routing (planner vs worker).
 - **Optional infra seams** — swap `SqliteSaver` → Temporal for multi-day durable workflows; `JsonFileMemory` → pgvector and the gateway → vLLM/SGLang at scale; add LlamaFirewall / NeMo Guardrails alongside the built-in checks.
 
 ## License

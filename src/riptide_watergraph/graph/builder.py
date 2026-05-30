@@ -14,6 +14,7 @@ from ..interfaces.swarm import SwarmComposer
 from ..tools.registry import StaticToolRegistry
 from .nodes import (
     GraphContext,
+    make_critic,
     make_finalize,
     make_guard_input,
     make_guard_output,
@@ -43,6 +44,7 @@ def build_graph(
     recall_k: int = 3,
     planner_model: str | None = None,
     worker_model: str | None = None,
+    enable_critic: bool = False,
 ):
     """Build and compile the orchestrator-worker graph.
 
@@ -88,17 +90,23 @@ def build_graph(
         route_after_orchestrator,
         {"swarm_worker": "swarm_worker", "worker": "worker"},
     )
+    # Workers exit to the critic (verification) when enabled, else straight to finalize.
+    worker_exit = "critic" if enable_critic else "finalize"
     g.add_conditional_edges(
         "worker",
         route_after_worker,
         {
             "human_approval": "human_approval",
             "worker": "worker",
-            "finalize": "finalize",
+            "finalize": worker_exit,
         },
     )
     g.add_edge("human_approval", "worker")
-    g.add_edge("swarm_worker", "finalize")
+    g.add_edge("swarm_worker", worker_exit)
+
+    if enable_critic:
+        g.add_node("critic", make_critic(ctx))
+        g.add_edge("critic", "finalize")
 
     # Reflection (if enabled) is the last logical step before output.
     if memory is not None and reflector is not None:

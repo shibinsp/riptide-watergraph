@@ -28,6 +28,8 @@ dependencies = [
 [project.optional-dependencies]
 # Real model gateway (any OpenAI-compatible provider, incl. local vLLM).
 litellm = ["litellm>=1.55,<2.0"]
+# Real MCP (Model Context Protocol) stdio transport for external tool servers.
+mcp = ["mcp>=1.0"]
 # Tracing backends (best-effort; the framework runs without them).
 observability = [
     "langfuse>=3.0,<4.0",
@@ -39,8 +41,8 @@ pgvector = [
     "langchain-postgres>=0.0.12",
     "psycopg[binary]>=3.2",
 ]
-# Convenience: everything needed to run against a real model with tracing.
-all = ["riptide-watergraph[litellm,observability]"]
+# Convenience: everything needed to run against a real model with tracing + MCP.
+all = ["riptide-watergraph[litellm,observability,mcp]"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",

@@ -24,6 +24,18 @@ class Settings(BaseSettings):
     # Persistent long-term memory store (Stage 2: lessons accumulate here across runs).
     memory_path: str = ".riptide_watergraph/memory.json"
 
+    # Stage 4: multi-tenancy + cost attribution.
+    tenant_id: str = "default"
+    data_dir: str = ".riptide_watergraph"  # base dir for per-tenant memory + usage log
+
+    def tenant_memory_path(self, tenant_id: str) -> str:
+        """Per-tenant memory namespace so lessons never leak across tenants."""
+        return f"{self.data_dir}/tenants/{tenant_id}/memory.json"
+
+    @property
+    def usage_log_path(self) -> str:
+        return f"{self.data_dir}/usage.jsonl"
+
     # Observability
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None

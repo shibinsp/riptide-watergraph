@@ -48,6 +48,7 @@ class GraphContext:
     recall_k: int = 3  # how many lessons to retrieve and inject
     tool_k: int = 4  # Stage 3: how many tools to retrieve on demand per subtask
     guardrails: GuardrailPipeline | None = None  # Stage 4: input/output safety
+    max_rounds: int = 2  # supervisor re-planning cap (rounds incl. the first)
 
     def __post_init__(self) -> None:
         # Per-role models default to the single configured model.
@@ -476,6 +477,74 @@ def _parse_verdict(content: str | None, result: WorkerResult) -> dict[str, Any]:
     return {"subtask": subtask, "verdict": "fail" if bad else "pass", "reason": "heuristic"}
 
 
+def make_supervisor(ctx: GraphContext):
+    """Review verdicts and, if anything failed, append corrective subtasks (capped)."""
+
+    def supervisor(state: OrchestratorState) -> dict[str, Any]:
+        rnd = state.get("round", 0) + 1
+        verdicts = state.get("verdicts") or []
+        failed = [v for v in verdicts if v.get("verdict") == "fail"]
+        metrics = state.get("metrics") or _empty_metrics()
+
+        with span("supervisor", round=rnd, n_failed=len(failed)):
+            if rnd >= ctx.max_rounds or not failed:
+                return {"round": rnd, "metrics": metrics}  # routing -> finalize
+
+            sys = Message(
+                role="system",
+                content=(
+                    "You are a supervisor. Some subtasks failed verification. Propose a "
+                    "short JSON array of corrective subtasks to fix them, or [] if none."
+                ),
+            )
+            usr = Message(
+                role="user",
+                content="Failed: "
+                + "; ".join(f"{v['subtask']} ({v.get('reason', '')})" for v in failed),
+            )
+            res = _run(ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr]))
+            _add_usage(metrics, res)
+            corrective = _parse_subtasks(res.content)
+            if not corrective:
+                return {"round": rnd, "metrics": metrics}  # nothing to add -> finalize
+
+            plan = list(state.get("plan") or [])
+            roles = list(state.get("roles") or [])
+            deps = list(state.get("dependencies") or [])
+            for sub in corrective:
+                plan.append(sub)
+                roles.append(role_for(sub))
+                deps.append([])
+            # cursor stays at the old length, so the worker picks up the new subtasks.
+            return {
+                "round": rnd,
+                "plan": plan,
+                "roles": roles,
+                "dependencies": deps,
+                "metrics": metrics,
+            }
+
+    return supervisor
+
+
+def _parse_subtasks(content: str | None) -> list[str]:
+    """Parse a JSON array of subtask strings; return [] on anything else."""
+    if not content:
+        return []
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if "\n" in text:
+            text = text.split("\n", 1)[1]
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed if str(x).strip()]
+    except json.JSONDecodeError:
+        pass
+    return []
+
+
 # --------------------------------------------------------------------------- #
 # Stage 2: memory recall + reflection
 # --------------------------------------------------------------------------- #
@@ -609,6 +678,12 @@ def make_guard_output(ctx: GraphContext):
 def route_after_guard_input(state: OrchestratorState) -> str:
     """guard_input -> blocked (straight to END) | proceed."""
     return "blocked" if state.get("blocked") else "proceed"
+
+
+def route_after_supervisor(state: OrchestratorState) -> str:
+    """supervisor -> worker (corrective subtasks were appended) | finalize."""
+    plan = state.get("plan") or []
+    return "worker" if state.get("cursor", 0) < len(plan) else "finalize"
 
 
 def route_after_orchestrator(state: OrchestratorState) -> str:

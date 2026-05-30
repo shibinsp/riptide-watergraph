@@ -17,6 +17,9 @@ class Settings(BaseSettings):
 
     # Default model string passed to LiteLLM (orchestrator/worker/finalizer).
     riptide_watergraph_model: str = "gpt-4o-mini"
+    # Optional per-role model routing (Phase C). Empty => use the default model.
+    planner_model: str = ""  # orchestrator + finalize (the "thinking" steps)
+    worker_model: str = ""  # workers (often a cheaper model)
 
     # Checkpoint database path for the LangGraph SqliteSaver.
     checkpoint_path: str = ".riptide_watergraph/checkpoints.sqlite"

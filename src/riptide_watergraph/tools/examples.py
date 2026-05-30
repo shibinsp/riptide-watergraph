@@ -10,13 +10,14 @@ from __future__ import annotations
 import ast
 import operator
 from pathlib import Path
+from typing import Any, Callable
 
 from ..interfaces.tools import ToolSpec
 from .registry import StaticToolRegistry
 
 # --- calculator (safe arithmetic eval) ---
 
-_OPS = {
+_OPS: dict[type, Callable[..., Any]] = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
     ast.Mult: operator.mul,

@@ -21,6 +21,8 @@ from typing import Any
 from langgraph.types import interrupt
 
 from ..interfaces.gateway import Message, ModelGateway
+from ..interfaces.memory import Memory
+from ..interfaces.reflector import Reflector, Trajectory
 from ..interfaces.swarm import SwarmComposer
 from ..observability.tracing import span
 from ..tools.registry import StaticToolRegistry, ToolValidationError
@@ -35,6 +37,21 @@ class GraphContext:
     registry: StaticToolRegistry
     composer: SwarmComposer
     model: str
+    memory: Memory | None = None  # Stage 2: long-term memory (recall + reflect)
+    reflector: Reflector | None = None  # Stage 2: distills lessons from trajectories
+    recall_k: int = 3  # how many lessons to retrieve and inject
+
+
+def _lessons_block(state: OrchestratorState) -> str:
+    """Render recalled lessons as a system-prompt preamble (empty if none)."""
+    lessons = state.get("recalled_lessons") or []
+    if not lessons:
+        return ""
+    bullets = "\n".join(f"- {ln}" for ln in lessons)
+    return (
+        "Relevant lessons from past tasks (apply them):\n"
+        f"{bullets}\n\n"
+    )
 
 
 def _run(coro: Any) -> Any:
@@ -95,7 +112,8 @@ def make_orchestrator(ctx: GraphContext):
             sys = Message(
                 role="system",
                 content=(
-                    "You are a planning orchestrator. Break the user's task into a "
+                    _lessons_block(state)
+                    + "You are a planning orchestrator. Break the user's task into a "
                     "short ordered list of concrete subtasks. Reply ONLY with a JSON "
                     'array of strings, e.g. ["step one", "step two"].'
                 ),
@@ -136,7 +154,8 @@ def make_worker(ctx: GraphContext):
             sys = Message(
                 role="system",
                 content=(
-                    "You are a worker. Accomplish the subtask. Use a tool if helpful; "
+                    _lessons_block(state)
+                    + "You are a worker. Accomplish the subtask. Use a tool if helpful; "
                     "otherwise answer directly and concisely."
                 ),
             )
@@ -249,6 +268,58 @@ def make_finalize(ctx: GraphContext):
             return {"final_answer": answer}
 
     return finalize
+
+
+# --------------------------------------------------------------------------- #
+# Stage 2: memory recall + reflection
+# --------------------------------------------------------------------------- #
+
+
+def make_recall(ctx: GraphContext):
+    """Retrieve relevant past lessons and stage them for prompt injection."""
+
+    def recall(state: OrchestratorState) -> dict[str, Any]:
+        task = state["task"]
+        with span("recall", task=task):
+            items = _run(ctx.memory.retrieve(task, k=ctx.recall_k))
+            lessons = [it.record.text for it in items]
+            return {"recalled_lessons": lessons}
+
+    return recall
+
+
+def make_reflect(ctx: GraphContext):
+    """Judge the outcome and distill lessons into long-term memory."""
+
+    def reflect(state: OrchestratorState) -> dict[str, Any]:
+        success = _compute_success(state)
+        with span("reflect", success=success):
+            trajectory = Trajectory(
+                task=state["task"],
+                plan=state.get("plan") or [],
+                results=list(state.get("results") or []),
+                success=success,
+                metrics=state.get("metrics") or {},
+                session_id=state.get("session_id", ""),
+            )
+            lessons = _run(ctx.reflector.reflect(trajectory))
+            if lessons:
+                _run(ctx.memory.write(lessons))
+            return {
+                "success": success,
+                "stored_lessons": [ln.text for ln in lessons],
+            }
+
+    return reflect
+
+
+def _compute_success(state: OrchestratorState) -> bool:
+    """Heuristic outcome signal: produced an answer, did work, no invalid tool calls."""
+    metrics = state.get("metrics") or {}
+    failures = sum((metrics.get("failures") or {}).values())
+    has_answer = bool(state.get("final_answer"))
+    did_work = len(state.get("results") or []) > 0
+    return has_answer and did_work and failures == 0
 
 
 # --------------------------------------------------------------------------- #

@@ -33,6 +33,7 @@ from .interfaces import (
     ToolSpec,
     Trajectory,
 )
+from .mcp import FakeMcpClient, McpToolInfo, register_mcp_tools
 from .memory import InMemoryMemory, JsonFileMemory, LLMReflector, MemoryType
 from .observability import CostTracker, UsageRecord
 from .swarm import HeuristicSwarmComposer, SingleAgentComposer
@@ -72,4 +73,8 @@ __all__ = [
     "ToolSpec",
     "SwarmComposer",
     "SwarmDecision",
+    # MCP tool interop
+    "register_mcp_tools",
+    "FakeMcpClient",
+    "McpToolInfo",
 ]

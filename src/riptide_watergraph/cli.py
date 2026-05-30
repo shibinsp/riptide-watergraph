@@ -24,8 +24,15 @@ from .graph import build_graph
 from .guardrails import default_guardrails
 from .memory import HashingEmbedding, JsonFileMemory, LexicalOverlapReranker
 from .memory.reflection import LLMReflector
-from .observability.cost import CostTracker, UsageRecord, cost_from_usage, estimate_tokens
+from .observability.cost import (
+    BudgetExceeded,
+    CostTracker,
+    UsageRecord,
+    cost_from_usage,
+    estimate_tokens,
+)
 from .observability.tracing import init_tracing
+from .service import enforce_budget
 from .swarm import HeuristicSwarmComposer, LLMSwarmComposer, SingleAgentComposer
 from .tools import default_registry
 
@@ -54,6 +61,12 @@ def _run_task(
     settings = get_settings()
     init_tracing(settings)
     Path(settings.checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        enforce_budget(settings, tenant_id)
+    except BudgetExceeded as exc:
+        print(f" BUDGET EXCEEDED: {exc}")
+        return 2
 
     model = settings.riptide_watergraph_model
     planner_model = settings.planner_model or model
@@ -241,6 +254,10 @@ def main(argv: list[str] | None = None) -> int:
     eval_p.add_argument("--offline", action="store_true",
                         help="Evaluate with the deterministic offline gateway.")
 
+    serve_p = sub.add_parser("serve", help="Run the HTTP service (needs the [server] extra).")
+    serve_p.add_argument("--host", default="127.0.0.1")
+    serve_p.add_argument("--port", type=int, default=8000)
+
     args = parser.parse_args(argv)
     if args.command == "run":
         return _run_task(
@@ -257,8 +274,21 @@ def main(argv: list[str] | None = None) -> int:
         return _show_costs()
     if args.command == "eval":
         return _run_eval(args.offline)
+    if args.command == "serve":
+        return _serve(args.host, args.port)
     parser.print_help()
     return 1
+
+
+def _serve(host: str, port: int) -> int:
+    try:
+        import uvicorn
+    except ImportError:
+        print('the HTTP server needs the [server] extra: pip install -e ".[server]"')
+        return 1
+    print(f" serving riptide-watergraph on http://{host}:{port}")
+    uvicorn.run("riptide_watergraph.server:app", host=host, port=port)
+    return 0
 
 
 if __name__ == "__main__":

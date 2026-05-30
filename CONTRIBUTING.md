@@ -25,6 +25,12 @@ riptide eval --offline            # behavioral regression gate
 
 Everything runs **offline** with the deterministic `DemoGateway` — no API key needed.
 
+Optionally install the git hooks to run ruff + mypy before each commit:
+
+```bash
+pip install pre-commit && pre-commit install
+```
+
 ## Adding a feature
 
 1. Add or implement an interface in `interfaces/` (keep new heavy deps in an optional

@@ -26,7 +26,7 @@ from .memory import HashingEmbedding, JsonFileMemory, LexicalOverlapReranker
 from .memory.reflection import LLMReflector
 from .observability.cost import CostTracker, UsageRecord, cost_from_usage, estimate_tokens
 from .observability.tracing import init_tracing
-from .swarm import HeuristicSwarmComposer, SingleAgentComposer
+from .swarm import HeuristicSwarmComposer, LLMSwarmComposer, SingleAgentComposer
 from .tools import default_registry
 
 
@@ -49,24 +49,26 @@ def _run_task(
     single: bool = False,
     tenant_id: str = "default",
     guardrails_on: bool = True,
+    llm_composer: bool = False,
 ) -> int:
     settings = get_settings()
     init_tracing(settings)
     Path(settings.checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
 
-    base_gateway = (
-        DemoGateway()
-        if offline
-        else LiteLLMGateway(default_model=settings.riptide_watergraph_model)
-    )
+    model = settings.riptide_watergraph_model
+    planner_model = settings.planner_model or model
+    worker_model = settings.worker_model or model
+
+    base_gateway = DemoGateway() if offline else LiteLLMGateway(default_model=model)
     # Wrap with timeout + retry so transient API failures don't crash the run.
     gateway = ResilientGateway(base_gateway)
     registry = default_registry()
-    composer = (
-        SingleAgentComposer(model=settings.riptide_watergraph_model)
-        if single
-        else HeuristicSwarmComposer(model=settings.riptide_watergraph_model)
-    )
+    if single:
+        composer = SingleAgentComposer(model=planner_model)
+    elif llm_composer:
+        composer = LLMSwarmComposer(gateway, model=planner_model)
+    else:
+        composer = HeuristicSwarmComposer(model=planner_model)
 
     # Stage 2 + 4: per-tenant persistent memory (lessons never leak across tenants),
     # with hybrid dense+lexical retrieval (offline embedder) and reranking.
@@ -79,11 +81,7 @@ def _run_task(
         if memory_on
         else None
     )
-    reflector = (
-        LLMReflector(gateway, model=settings.riptide_watergraph_model)
-        if memory_on
-        else None
-    )
+    reflector = LLMReflector(gateway, model=planner_model) if memory_on else None
     guardrails = default_guardrails() if guardrails_on else None
 
     thread_id = str(uuid.uuid4())
@@ -94,11 +92,13 @@ def _run_task(
             gateway=gateway,
             registry=registry,
             composer=composer,
-            model=settings.riptide_watergraph_model,
+            model=model,
             checkpointer=checkpointer,
             memory=memory,
             reflector=reflector,
             guardrails=guardrails,
+            planner_model=planner_model,
+            worker_model=worker_model,
         )
 
         print(f" tenant={tenant_id} thread={thread_id}")
@@ -231,6 +231,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="Tenant id for memory isolation + cost attribution.")
     run_p.add_argument("--no-guardrails", action="store_true",
                        help="Disable input/output guardrails for this run.")
+    run_p.add_argument("--llm-composer", action="store_true",
+                       help="Use the LLM swarm composer (plan + dependencies) instead "
+                            "of the heuristic one.")
 
     sub.add_parser("costs", help="Show the per-tenant cost dashboard.")
 
@@ -248,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
             single=args.single,
             tenant_id=args.tenant,
             guardrails_on=not args.no_guardrails,
+            llm_composer=args.llm_composer,
         )
     if args.command == "costs":
         return _show_costs()

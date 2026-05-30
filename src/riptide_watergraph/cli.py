@@ -144,6 +144,12 @@ def _print_result(result: dict, *, memory_on: bool, memory) -> None:
     if decision:
         print(f" composition: {decision.get('mode')} "
               f"(parallelism={decision.get('parallelism')}) - {decision.get('rationale')}")
+    roles = result.get("roles") or []
+    plan = result.get("plan") or []
+    if roles:
+        print(" roles: " + ", ".join(
+            f"{plan[i] if i < len(plan) else '?'} -> {roles[i]}" for i in range(len(roles))
+        ))
 
     for tag in ("guard_violations", "guard_violations_out"):
         if result.get(tag):

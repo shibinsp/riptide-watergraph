@@ -53,8 +53,10 @@ class ToolRegistry(ABC):
         """Export OpenAI-format schemas for the named tools (or all)."""
 
     @abstractmethod
-    async def retrieve(self, query: str, *, k: int = 5) -> list[ToolSpec]:
-        """On-demand tool retrieval. Stage-1 stub returns all registered tools."""
+    async def retrieve(
+        self, query: str, *, k: int = 5, allowed: set[str] | None = None
+    ) -> list[ToolSpec]:
+        """On-demand tool retrieval, optionally restricted to ``allowed`` tool names."""
 
     @abstractmethod
     async def invoke(self, name: str, arguments: dict[str, Any]) -> Any:

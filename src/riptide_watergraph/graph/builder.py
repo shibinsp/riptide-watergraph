@@ -22,10 +22,12 @@ from .nodes import (
     make_orchestrator,
     make_recall,
     make_reflect,
+    make_supervisor,
     make_swarm_worker,
     make_worker,
     route_after_guard_input,
     route_after_orchestrator,
+    route_after_supervisor,
     route_after_worker,
 )
 from .state import OrchestratorState
@@ -45,6 +47,8 @@ def build_graph(
     planner_model: str | None = None,
     worker_model: str | None = None,
     enable_critic: bool = False,
+    enable_supervisor: bool = False,
+    max_rounds: int = 2,
 ):
     """Build and compile the orchestrator-worker graph.
 
@@ -57,6 +61,9 @@ def build_graph(
     * ``guardrails`` — wraps the graph with ``guard_input`` (block/redact) and
       ``guard_output`` (redact) safety nodes.
     """
+    # The supervisor needs the critic's verdicts, so it implies the critic.
+    enable_critic = enable_critic or enable_supervisor
+
     ctx = GraphContext(
         gateway=gateway,
         registry=registry,
@@ -68,6 +75,7 @@ def build_graph(
         reflector=reflector,
         guardrails=guardrails,
         recall_k=recall_k,
+        max_rounds=max_rounds,
     )
 
     g: StateGraph = StateGraph(OrchestratorState)
@@ -106,7 +114,16 @@ def build_graph(
 
     if enable_critic:
         g.add_node("critic", make_critic(ctx))
-        g.add_edge("critic", "finalize")
+        if enable_supervisor:
+            g.add_node("supervisor", make_supervisor(ctx))
+            g.add_edge("critic", "supervisor")
+            g.add_conditional_edges(
+                "supervisor",
+                route_after_supervisor,
+                {"worker": "worker", "finalize": "finalize"},
+            )
+        else:
+            g.add_edge("critic", "finalize")
 
     # Reflection (if enabled) is the last logical step before output.
     if memory is not None and reflector is not None:

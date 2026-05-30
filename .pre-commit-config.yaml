@@ -1,0 +1,18 @@
+# Run the same checks CI runs, before each commit. Setup:
+#   pip install pre-commit && pre-commit install
+# These hooks call the locally-installed tools (from the [dev] extra) — no network fetch.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: ruff check src tests examples
+        language: system
+        pass_filenames: false
+        types: [python]
+      - id: mypy
+        name: mypy
+        entry: mypy src
+        language: system
+        pass_filenames: false
+        types: [python]

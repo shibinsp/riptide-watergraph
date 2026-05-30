@@ -42,16 +42,26 @@ def _eval_node(node: ast.AST) -> float:
 
 def calculator(expression: str) -> str:
     """Evaluate a basic arithmetic expression safely."""
-    tree = ast.parse(expression, mode="eval")
-    return str(_eval_node(tree))
+    try:
+        tree = ast.parse(expression, mode="eval")
+        return str(_eval_node(tree))
+    except Exception as exc:  # noqa: BLE001 - surface a message, never crash
+        return f"calculator error: {exc}"
 
 
 def write_note(path: str, text: str) -> str:
-    """Write ``text`` to ``path`` (side-effecting)."""
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
-    return f"wrote {len(text)} chars to {p}"
+    """Write ``text`` to ``path`` (side-effecting).
+
+    Confined to the current working directory: absolute paths or ``..`` traversal that
+    escape the cwd are refused, so a tool call can't write to arbitrary locations.
+    """
+    base = Path.cwd().resolve()
+    target = (base / path).resolve()
+    if target != base and base not in target.parents:
+        raise ValueError(f"refusing to write outside the working directory: {path!r}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    return f"wrote {len(text)} chars to {target}"
 
 
 # --- additional read-only tools (give on-demand retrieval something to rank) ---

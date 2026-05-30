@@ -19,12 +19,12 @@ from langgraph.types import Command
 
 from .config import get_settings
 from .evaluation import EvalRunner
-from .gateway import DemoGateway, LiteLLMGateway
+from .gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from .graph import build_graph
 from .guardrails import default_guardrails
 from .memory import JsonFileMemory
 from .memory.reflection import LLMReflector
-from .observability.cost import CostTracker, UsageRecord, estimate_tokens
+from .observability.cost import CostTracker, UsageRecord, cost_from_usage, estimate_tokens
 from .observability.tracing import init_tracing
 from .swarm import HeuristicSwarmComposer, SingleAgentComposer
 from .tools import default_registry
@@ -54,11 +54,13 @@ def _run_task(
     init_tracing(settings)
     Path(settings.checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
 
-    gateway = (
+    base_gateway = (
         DemoGateway()
         if offline
         else LiteLLMGateway(default_model=settings.riptide_watergraph_model)
     )
+    # Wrap with timeout + retry so transient API failures don't crash the run.
+    gateway = ResilientGateway(base_gateway)
     registry = default_registry()
     composer = (
         SingleAgentComposer(model=settings.riptide_watergraph_model)
@@ -153,6 +155,13 @@ def _record_usage(settings, tenant_id: str, task: str, result: dict) -> None:
         + " ".join(r.get("output", "") for r in (result.get("results") or []))
         + (result.get("final_answer") or "")
     )
+    # Prefer real token usage from the gateway; fall back to the composer estimate.
+    usage = (result.get("metrics") or {}).get("usage") or {}
+    actual_total = int(usage.get("total_tokens", 0) or 0)
+    if actual_total > 0:
+        cost = cost_from_usage(settings.riptide_watergraph_model, usage)
+    else:
+        cost = float(decision.get("estimated_cost_usd", 0.0))
     tracker = CostTracker(settings.usage_log_path)
     tracker.record(
         UsageRecord(
@@ -160,7 +169,8 @@ def _record_usage(settings, tenant_id: str, task: str, result: dict) -> None:
             task=task,
             mode=decision.get("mode", "single"),
             est_tokens=estimate_tokens(blob),
-            cost_usd=float(decision.get("estimated_cost_usd", 0.0)),
+            actual_tokens=actual_total,
+            cost_usd=cost,
             blocked=bool(result.get("blocked")),
             ts=time.time(),
         )

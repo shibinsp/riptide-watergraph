@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from ..gateway import DemoGateway, LiteLLMGateway
+from ..config import get_settings
+from ..gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from ..graph import build_graph
 from ..guardrails import default_guardrails
 from ..memory import HashingEmbedding, InMemoryMemory, LexicalOverlapReranker
@@ -40,12 +41,16 @@ class EvalReport(BaseModel):
 class EvalRunner:
     """Runs the task suite through a freshly built graph."""
 
-    def __init__(self, *, offline: bool = True, model: str = "eval-model") -> None:
+    def __init__(self, *, offline: bool = True, model: str | None = None) -> None:
         self.offline = offline
-        self.model = model
+        # For a real run, default to the configured model rather than a placeholder.
+        self.model = model or ("demo" if offline else get_settings().riptide_watergraph_model)
 
     def _gateway(self):
-        return DemoGateway() if self.offline else LiteLLMGateway(default_model=self.model)
+        if self.offline:
+            return DemoGateway()
+        # Real model: wrap LiteLLM in the resilient gateway (timeouts + retries).
+        return ResilientGateway(LiteLLMGateway(default_model=self.model))
 
     def _build(self, memory):
         gateway = self._gateway()

@@ -14,6 +14,18 @@ from pathlib import Path
 from pydantic import BaseModel
 
 
+class BudgetExceeded(Exception):
+    """Raised when a tenant's accumulated spend has reached its budget ceiling."""
+
+    def __init__(self, tenant_id: str, spent: float, ceiling: float) -> None:
+        self.tenant_id = tenant_id
+        self.spent = spent
+        self.ceiling = ceiling
+        super().__init__(
+            f"tenant {tenant_id!r} over budget: ${spent:.6f} >= ${ceiling:.6f}"
+        )
+
+
 def estimate_tokens(text: str) -> int:
     """Rough token estimate (~4 chars/token)."""
     return max(0, len(text) // 4)

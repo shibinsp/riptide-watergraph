@@ -62,11 +62,11 @@ class ModelGateway(ABC):
         """Run one (non-streaming) completion and return a normalized result."""
 
     @abstractmethod
-    async def stream(
+    def stream(
         self,
         *,
         model: str,
         messages: list[Message],
         **kwargs: Any,
     ) -> AsyncIterator[str]:
-        """Stream completion text chunks."""
+        """Stream completion text chunks (implementations are async generators)."""

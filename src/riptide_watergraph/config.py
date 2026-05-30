@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Checkpoint database path for the LangGraph SqliteSaver.
     checkpoint_path: str = ".riptide_watergraph/checkpoints.sqlite"
 
+    # Persistent long-term memory store (Stage 2: lessons accumulate here across runs).
+    memory_path: str = ".riptide_watergraph/memory.json"
+
     # Observability
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None

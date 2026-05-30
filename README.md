@@ -37,6 +37,31 @@ Pure Python, one toolchain. The retrieval-ranking core (**BM25** lexical scoring
 | Observability | Langfuse via OTEL + own graph spans | eval/regression gates |
 | Durability | LangGraph `SqliteSaver` checkpointer | Temporal for multi-day workflows |
 
+## Execution graph
+
+```mermaid
+flowchart TD
+    START([START]) --> GI[guard_input: block injection / redact PII]
+    GI -->|blocked| EN([END])
+    GI -->|ok| RC[recall: inject past lessons]
+    RC --> OR{orchestrator: cost-aware composer}
+    OR -->|single| WK[worker: on-demand tools]
+    OR -->|swarm| SW[swarm_worker: dependency waves + blackboard]
+    WK -->|side-effecting tool| HA[human_approval: interrupt]
+    WK -->|more subtasks| WK
+    WK -->|done| FZ[finalize]
+    HA --> WK
+    SW --> FZ
+    FZ --> RF[reflect: distill lesson + episodic]
+    RF --> GO[guard_output: redact PII]
+    GO --> EN
+```
+
+Each node is optional and additive: with no memory/guardrails/composer configured, the
+graph collapses to the Stage-1 spine (`orchestrator → worker → finalize`). `recall`/`reflect`
+appear with memory, `guard_input`/`guard_output` with guardrails, and `swarm_worker` when the
+composer chooses a swarm.
+
 ## Quickstart
 
 Prerequisites: Python 3.11+. No compiler or other toolchain needed.

@@ -37,11 +37,12 @@ async def test_reflector_distills_lesson():
     assert rec.metadata["success"] is False
 
 
-async def test_reflector_handles_plain_text_reply():
+async def test_reflector_rejects_non_json_reply():
+    # Quality gate (Phase B): a non-JSON / lesson-less reply stores NO lesson,
+    # rather than polluting memory with arbitrary prose.
     def responder(system: str, user: str) -> CompletionResult:
         return CompletionResult(content="Always validate tool arguments first.")
 
     reflector = LLMReflector(MockGateway(responder), model="mock")
     lessons = await reflector.reflect(Trajectory(task="t", success=True))
-    assert len(lessons) == 1
-    assert "validate" in lessons[0].text.lower()
+    assert lessons == []

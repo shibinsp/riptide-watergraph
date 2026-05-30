@@ -66,7 +66,7 @@ class LLMSwarmComposer(SwarmComposer):
             cost = single_cost
 
         return SwarmDecision(
-            mode=mode,
+            mode="swarm" if mode == "swarm" else "single",
             members=members,
             estimated_cost_usd=cost,
             single_cost_usd=single_cost,

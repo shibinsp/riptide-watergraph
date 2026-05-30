@@ -33,6 +33,7 @@ from .observability.cost import (
 )
 from .observability.tracing import init_tracing
 from .service import enforce_budget
+from .interfaces import SwarmComposer
 from .swarm import HeuristicSwarmComposer, LLMSwarmComposer, SingleAgentComposer
 from .tools import default_registry
 
@@ -76,6 +77,7 @@ def _run_task(
     # Wrap with timeout + retry so transient API failures don't crash the run.
     gateway = ResilientGateway(base_gateway)
     registry = default_registry()
+    composer: SwarmComposer
     if single:
         composer = SingleAgentComposer(model=planner_model)
     elif llm_composer:

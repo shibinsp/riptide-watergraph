@@ -22,9 +22,10 @@ from langgraph.types import interrupt
 
 from ..guardrails.pipeline import GuardrailPipeline
 from ..interfaces.gateway import Message, ModelGateway
-from ..interfaces.memory import Memory
+from ..interfaces.memory import Memory, MemoryRecord
 from ..interfaces.reflector import Reflector, Trajectory
 from ..interfaces.swarm import SwarmComposer
+from ..memory.types import MemoryType
 from ..observability.tracing import span
 from ..tools.registry import StaticToolRegistry, ToolValidationError
 from .state import OrchestratorState, WorkerResult
@@ -379,8 +380,14 @@ def make_recall(ctx: GraphContext):
         assert ctx.memory is not None  # builder only adds this node when memory is set
         task = state["task"]
         with span("recall", task=task):
-            items = _run(ctx.memory.retrieve(task, k=ctx.recall_k))
-            lessons = [it.record.text for it in items]
+            # Over-fetch then drop episodic trajectories — only distilled lessons
+            # (procedural/semantic) are injected into prompts.
+            items = _run(ctx.memory.retrieve(task, k=ctx.recall_k * 2))
+            lessons = [
+                it.record.text
+                for it in items
+                if it.record.metadata.get("type") != MemoryType.EPISODIC.value
+            ][: ctx.recall_k]
             return {"recalled_lessons": lessons}
 
     return recall
@@ -402,14 +409,33 @@ def make_reflect(ctx: GraphContext):
                 session_id=state.get("session_id", ""),
             )
             lessons = _run(ctx.reflector.reflect(trajectory))
-            if lessons:
-                _run(ctx.memory.write(lessons))
+            # Store the full trajectory as episodic memory (not just the distilled
+            # lesson) so the raw experience is preserved, per the research.
+            episodic = _episodic_record(state, success)
+            _run(ctx.memory.write([*lessons, episodic]))
             return {
                 "success": success,
                 "stored_lessons": [ln.text for ln in lessons],
             }
 
     return reflect
+
+
+def _episodic_record(state: OrchestratorState, success: bool) -> MemoryRecord:
+    """Summarize a completed run as an episodic memory record."""
+    session = state.get("session_id", "") or state["task"][:24]
+    results = state.get("results") or []
+    steps = "; ".join(f"{r['subtask']} -> {r['output']}" for r in results)[:600]
+    outcome = "success" if success else "failure"
+    return MemoryRecord(
+        id=f"episodic-{session}",
+        text=f"Task: {state['task']} | outcome: {outcome} | {steps}",
+        metadata={
+            "type": MemoryType.EPISODIC.value,
+            "task": state["task"],
+            "success": success,
+        },
+    )
 
 
 def _compute_success(state: OrchestratorState) -> bool:

@@ -40,3 +40,6 @@ class OrchestratorState(TypedDict, total=False):
     recalled_lessons: list[str]  # lessons retrieved from memory, injected into prompts
     success: bool  # outcome judged at reflection time
     stored_lessons: list[str]  # lessons written back to memory this run
+
+    # --- Stage 3: dynamic swarm composition ---
+    swarm_decision: dict[str, Any]  # the composer's single-vs-swarm decision

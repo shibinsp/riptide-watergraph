@@ -168,6 +168,7 @@ real model with `EvalRunner(offline=False)`. See
 - **Stage 3 ✅** — cost-aware dynamic swarm composer + on-demand, versioned tool registry.
 - **Stage 4 ✅** — guardrails (injection/PII), tenant-isolated memory, per-tenant cost dashboard.
 - **MCP tool interop ✅** — external MCP-server tools register into the registry and run like local tools (`[mcp]` extra for the stdio transport).
+- **Production hardening ✅** — `ResilientGateway` (timeouts + retry/backoff), tool-error isolation (a failing tool can't crash a run), real token-usage cost accounting with a model price table, path-traversal/arg-validation security fixes, and CI lint + type-check + coverage.
 - **Optional infra seams** — swap `SqliteSaver` → Temporal for multi-day durable workflows; `JsonFileMemory` → pgvector and the gateway → vLLM/SGLang at scale; add LlamaFirewall / NeMo Guardrails alongside the built-in checks.
 
 ## License

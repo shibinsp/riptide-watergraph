@@ -89,6 +89,7 @@ Riptide-Watergraph/
     ├── tools/                   # StaticToolRegistry (versioned, on-demand) + tools
     ├── swarm/                   # HeuristicSwarmComposer + cost model
     ├── guardrails/              # PII redaction, injection blocking, pipeline
+    ├── mcp/                     # MCP tool interop (client, adapter, stdio)
     ├── graph/                   # state, nodes (recall/reflect/swarm/guard), builder
     ├── observability/           # OTEL + Langfuse tracing + per-tenant CostTracker
     ├── evaluation/              # offline task suite + scoring runner
@@ -131,6 +132,27 @@ appends a `UsageRecord` to a per-tenant usage log — `riptide costs` prints the
 See [`test_guardrails_graph.py`](tests/test_guardrails_graph.py) and
 [`test_tenancy_cost.py`](tests/test_tenancy_cost.py).
 
+## MCP tool interop
+
+Tools from external [MCP](https://modelcontextprotocol.io) servers plug straight into the
+registry — once registered they are ordinary `ToolSpec`s the worker/swarm call with no
+graph changes. The core is dependency-free and testable offline via `FakeMcpClient`; the
+real stdio transport (`StdioMcpClient`) needs the optional `[mcp]` extra. MCP tools are
+treated as **side-effecting (human-approval gated) unless the server marks them
+read-only** — read-only tools run inline and in parallel.
+
+```python
+from riptide_watergraph import register_mcp_tools, default_registry
+from riptide_watergraph.mcp.stdio import StdioMcpClient   # pip install -e ".[mcp]"
+
+registry = default_registry()
+client = StdioMcpClient(command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", "/data"])
+await register_mcp_tools(registry, client, prefix="fs.")   # fs.read_file, fs.write_file, ...
+# Pass `registry` to build_graph — MCP tools are now callable like any local tool.
+```
+
+See [`mcp/`](src/riptide_watergraph/mcp) and [`test_mcp.py`](tests/test_mcp.py).
+
 ## Evaluation
 
 The research consensus is to **run your own evals** rather than trust vendor benchmarks.
@@ -145,6 +167,7 @@ real model with `EvalRunner(offline=False)`. See
 - **Stage 2 ✅** — memory + reflection: persistent lessons, recall-injection, end-of-task reflection.
 - **Stage 3 ✅** — cost-aware dynamic swarm composer + on-demand, versioned tool registry.
 - **Stage 4 ✅** — guardrails (injection/PII), tenant-isolated memory, per-tenant cost dashboard.
+- **MCP tool interop ✅** — external MCP-server tools register into the registry and run like local tools (`[mcp]` extra for the stdio transport).
 - **Optional infra seams** — swap `SqliteSaver` → Temporal for multi-day durable workflows; `JsonFileMemory` → pgvector and the gateway → vLLM/SGLang at scale; add LlamaFirewall / NeMo Guardrails alongside the built-in checks.
 
 ## License

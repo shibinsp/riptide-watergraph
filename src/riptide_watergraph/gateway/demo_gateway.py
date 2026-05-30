@@ -15,6 +15,7 @@ from typing import Any, AsyncIterator
 from ..interfaces.gateway import CompletionResult, Message, ModelGateway
 
 _MATH_RE = re.compile(r"[-+]?\d[\d\s]*[-+*/].*\d")
+_SPLIT_RE = re.compile(r"\s+(?:and then|then|and|also|;|,|plus)\s+", re.IGNORECASE)
 
 
 class DemoGateway(ModelGateway):
@@ -40,7 +41,7 @@ class DemoGateway(ModelGateway):
             return CompletionResult(content=json.dumps(self._plan(user)))
 
         if "You are a worker" in system:
-            return self._worker(user)
+            return self._worker(user, tools)
 
         # finalize
         return CompletionResult(content=self._finalize(user))
@@ -55,18 +56,27 @@ class DemoGateway(ModelGateway):
 
     @staticmethod
     def _plan(task: str) -> list[str]:
-        # One subtask is enough to demo the spine.
-        return [task]
+        # Split on connectives so multi-goal tasks decompose (and may trigger a swarm).
+        parts = [p.strip() for p in _SPLIT_RE.split(task) if p.strip()]
+        return parts or [task]
 
     @staticmethod
-    def _worker(subtask: str) -> CompletionResult:
+    def _worker(subtask: str, tools: list[dict[str, Any]] | None) -> CompletionResult:
         low = subtask.lower()
-        if _MATH_RE.search(subtask):
-            expr = subtask  # the safe calculator parses the arithmetic out
+        available = {
+            (t.get("function") or {}).get("name")
+            for t in (tools or [])
+        }
+
+        def offer(name: str) -> bool:
+            # If the model was given tools, only call ones actually offered.
+            return name in available if available else True
+
+        if _MATH_RE.search(subtask) and offer("calculator"):
             return CompletionResult(
-                tool_calls=[_call("calculator", {"expression": _extract_expr(expr)})]
+                tool_calls=[_call("calculator", {"expression": _extract_expr(subtask)})]
             )
-        if any(w in low for w in ("save", "note", "write", "record")):
+        if any(w in low for w in ("save", "note", "write", "record")) and offer("write_note"):
             return CompletionResult(
                 tool_calls=[
                     _call(
@@ -78,6 +88,12 @@ class DemoGateway(ModelGateway):
                     )
                 ]
             )
+        if any(w in low for w in ("count", "words")) and offer("word_count"):
+            return CompletionResult(tool_calls=[_call("word_count", {"text": subtask})])
+        if any(w in low for w in ("upper", "capital")) and offer("uppercase"):
+            return CompletionResult(tool_calls=[_call("uppercase", {"text": subtask})])
+        if any(w in low for w in ("search", "find", "look up", "lookup")) and offer("web_search"):
+            return CompletionResult(tool_calls=[_call("web_search", {"query": subtask})])
         return CompletionResult(content=f"(offline) handled: {subtask}")
 
     @staticmethod

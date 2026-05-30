@@ -12,9 +12,17 @@ __version__ = "0.1.0"
 
 from .gateway import DemoGateway, LiteLLMGateway
 from .graph import build_graph
+from .guardrails import (
+    GuardrailPipeline,
+    PiiGuardrail,
+    PromptInjectionGuardrail,
+    default_guardrails,
+)
 from .interfaces import (
     Agent,
     CompletionResult,
+    Guardrail,
+    GuardrailResult,
     Memory,
     Message,
     ModelGateway,
@@ -26,6 +34,7 @@ from .interfaces import (
     Trajectory,
 )
 from .memory import InMemoryMemory, JsonFileMemory, LLMReflector, MemoryType
+from .observability import CostTracker, UsageRecord
 from .swarm import HeuristicSwarmComposer, SingleAgentComposer
 from .tools import StaticToolRegistry, default_registry
 
@@ -42,6 +51,15 @@ __all__ = [
     "default_registry",
     "SingleAgentComposer",
     "HeuristicSwarmComposer",
+    # guardrails + observability (Stage 4)
+    "GuardrailPipeline",
+    "default_guardrails",
+    "PiiGuardrail",
+    "PromptInjectionGuardrail",
+    "Guardrail",
+    "GuardrailResult",
+    "CostTracker",
+    "UsageRecord",
     # interfaces
     "Agent",
     "ModelGateway",

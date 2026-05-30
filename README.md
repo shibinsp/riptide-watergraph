@@ -189,6 +189,24 @@ its dependents' prompts. **Model routing** (`planner_model` / `worker_model`) le
 orchestrator/finalize use a premium model while workers use a cheaper one. See
 [`test_orchestration.py`](tests/test_orchestration.py) and [`test_waves.py`](tests/test_waves.py).
 
+### Heterogeneous agents (roles, critic, supervisor, handoff)
+
+The swarm runs **specialist** agents, not generic workers:
+
+- **Roles** — each subtask is assigned a role (`researcher`, `analyst`, `scribe`,
+  `generalist`) with a role-specific prompt and a **scoped tool allow-list** (least
+  privilege per agent). Always on; defaults to `generalist` (== prior behavior).
+- **Critic** (`--critic`) — an adversarial verifier checks each result (`pass`/`fail`) before
+  finalize, which then builds the answer from **verified** results only.
+- **Supervisor** (`--supervisor`, implies `--critic`) — reviews verdicts and appends
+  **corrective subtasks** for the failures, looping back through the workers up to a hard
+  `max_rounds` cap.
+- **Handoff** — a worker can emit a `handoff(role, reason)` call to **delegate its subtask to a
+  better-suited specialist** (capped at one per subtask).
+
+See [`test_roles.py`](tests/test_roles.py), [`test_critic.py`](tests/test_critic.py),
+[`test_supervisor.py`](tests/test_supervisor.py), [`test_handoff.py`](tests/test_handoff.py).
+
 ## Production hardening (Stage 4)
 
 Guardrails wrap the graph: a **`guard_input`** node blocks prompt-injection attempts and

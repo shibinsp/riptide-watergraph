@@ -10,7 +10,7 @@ from __future__ import annotations
 
 __version__ = "0.1.0"
 
-from .gateway import DemoGateway, LiteLLMGateway
+from .gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from .graph import build_graph
 from .guardrails import (
     GuardrailPipeline,
@@ -44,6 +44,7 @@ __all__ = [
     "build_graph",
     "LiteLLMGateway",
     "DemoGateway",
+    "ResilientGateway",
     "InMemoryMemory",
     "JsonFileMemory",
     "LLMReflector",

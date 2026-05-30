@@ -36,7 +36,7 @@ from .interfaces import (
 from .mcp import FakeMcpClient, McpToolInfo, register_mcp_tools
 from .memory import InMemoryMemory, JsonFileMemory, LLMReflector, MemoryType
 from .observability import CostTracker, UsageRecord
-from .swarm import HeuristicSwarmComposer, SingleAgentComposer
+from .swarm import HeuristicSwarmComposer, LLMSwarmComposer, SingleAgentComposer
 from .tools import StaticToolRegistry, default_registry
 
 __all__ = [
@@ -53,6 +53,7 @@ __all__ = [
     "default_registry",
     "SingleAgentComposer",
     "HeuristicSwarmComposer",
+    "LLMSwarmComposer",
     # guardrails + observability (Stage 4)
     "GuardrailPipeline",
     "default_guardrails",

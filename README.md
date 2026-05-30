@@ -100,13 +100,17 @@ Riptide-Watergraph/
 ## Self-learning loop (Stage 2)
 
 After each task the graph runs a **`reflect`** step: it judges success/failure, asks the
-model to distill one reusable lesson, and writes it to persistent memory (`JsonFileMemory`,
-deduped by content hash, capped to bound growth). At the start of the next task a **`recall`**
-step retrieves the most relevant lessons (BM25 + RRF) and injects them into the orchestrator
-and worker prompts. Over repeated runs the lesson store grows and is reused — improvement
-**without any fine-tuning** (the Reflexion / ReasoningBank pattern). See
-[`test_self_learning.py`](tests/test_self_learning.py) for a deterministic proof that success
-rises across runs purely from recall + reflection.
+model to distill one reusable lesson (a **quality gate** drops non-JSON/empty replies so
+prose can't pollute memory), stores it plus the full **episodic** trajectory in persistent
+memory (`JsonFileMemory`). At the start of the next task a **`recall`** step retrieves the
+most relevant lessons and injects them into prompts — episodic records are excluded from
+injection. Retrieval is genuinely **hybrid**: BM25 lexical + dense embeddings fused by RRF,
+then **reranked** (an offline `HashingEmbedding` + `LexicalOverlapReranker` by default; swap
+in `LiteLLMEmbedding` / a cross-encoder for real semantics). `consolidate()` merges
+near-duplicate lessons by embedding similarity and decays old failed ones, so memory stays
+clean instead of degrading. Improvement **without any fine-tuning** (the Reflexion /
+ReasoningBank pattern). See [`test_self_learning.py`](tests/test_self_learning.py) and
+[`test_embedding.py`](tests/test_embedding.py).
 
 ## Dynamic swarm (Stage 3)
 
@@ -169,6 +173,7 @@ real model with `EvalRunner(offline=False)`. See
 - **Stage 4 ✅** — guardrails (injection/PII), tenant-isolated memory, per-tenant cost dashboard.
 - **MCP tool interop ✅** — external MCP-server tools register into the registry and run like local tools (`[mcp]` extra for the stdio transport).
 - **Production hardening ✅** — `ResilientGateway` (timeouts + retry/backoff), tool-error isolation (a failing tool can't crash a run), real token-usage cost accounting with a model price table, path-traversal/arg-validation security fixes, and CI lint + type-check + coverage.
+- **Memory quality ✅** — real hybrid retrieval (dense embeddings + BM25 fused by RRF) with reranking, episodic trajectory storage, a lesson quality gate, and `consolidate()` (near-duplicate merge + failed-lesson decay).
 - **Optional infra seams** — swap `SqliteSaver` → Temporal for multi-day durable workflows; `JsonFileMemory` → pgvector and the gateway → vLLM/SGLang at scale; add LlamaFirewall / NeMo Guardrails alongside the built-in checks.
 
 ## License

@@ -34,3 +34,9 @@ class OrchestratorState(TypedDict, total=False):
     final_answer: str | None
     messages: Annotated[list[dict[str, Any]], add]  # running transcript
     metrics: dict[str, Any]  # tool-call validity counters, etc.
+
+    # --- Stage 2: memory + self-learning ---
+    session_id: str  # identifies this run for reflection
+    recalled_lessons: list[str]  # lessons retrieved from memory, injected into prompts
+    success: bool  # outcome judged at reflection time
+    stored_lessons: list[str]  # lessons written back to memory this run

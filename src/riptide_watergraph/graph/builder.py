@@ -6,6 +6,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from ..guardrails.pipeline import GuardrailPipeline
 from ..interfaces.gateway import ModelGateway
 from ..interfaces.memory import Memory
 from ..interfaces.reflector import Reflector
@@ -14,12 +15,15 @@ from ..tools.registry import StaticToolRegistry
 from .nodes import (
     GraphContext,
     make_finalize,
+    make_guard_input,
+    make_guard_output,
     make_human_approval,
     make_orchestrator,
     make_recall,
     make_reflect,
     make_swarm_worker,
     make_worker,
+    route_after_guard_input,
     route_after_orchestrator,
     route_after_worker,
 )
@@ -35,16 +39,19 @@ def build_graph(
     checkpointer: Any | None = None,
     memory: Memory | None = None,
     reflector: Reflector | None = None,
+    guardrails: GuardrailPipeline | None = None,
     recall_k: int = 3,
 ):
     """Build and compile the orchestrator-worker graph.
 
-    Pass a checkpointer (e.g. ``SqliteSaver``) to enable durable interrupt/resume.
+    All advanced layers are optional and additive — with none of them, this is the
+    Stage-1 skeleton:
 
-    Stage 2 (optional, additive): pass ``memory`` to prepend a ``recall`` node that
-    retrieves past lessons and injects them into prompts; additionally pass
-    ``reflector`` to append a ``reflect`` node that distills lessons back into memory.
-    With neither, the graph is exactly the Stage-1 skeleton.
+    * ``checkpointer`` — durable interrupt/resume (e.g. ``SqliteSaver``).
+    * ``memory`` — prepends a ``recall`` node (inject past lessons into prompts).
+    * ``reflector`` (with ``memory``) — appends a ``reflect`` node (distill lessons).
+    * ``guardrails`` — wraps the graph with ``guard_input`` (block/redact) and
+      ``guard_output`` (redact) safety nodes.
     """
     ctx = GraphContext(
         gateway=gateway,
@@ -53,6 +60,7 @@ def build_graph(
         model=model,
         memory=memory,
         reflector=reflector,
+        guardrails=guardrails,
         recall_k=recall_k,
     )
 
@@ -63,13 +71,12 @@ def build_graph(
     g.add_node("human_approval", make_human_approval(ctx))
     g.add_node("finalize", make_finalize(ctx))
 
-    # Entry: recall first if memory is present, else straight to the orchestrator.
     if memory is not None:
         g.add_node("recall", make_recall(ctx))
-        g.add_edge(START, "recall")
         g.add_edge("recall", "orchestrator")
+        entry_node = "recall"
     else:
-        g.add_edge(START, "orchestrator")
+        entry_node = "orchestrator"
 
     # The composer's decision routes to parallel swarm or sequential single-agent.
     g.add_conditional_edges(
@@ -86,17 +93,31 @@ def build_graph(
             "finalize": "finalize",
         },
     )
-    # After approval, return to worker, which resolves the pending action.
     g.add_edge("human_approval", "worker")
-    # The swarm handles all subtasks in one parallel pass, then finalizes.
     g.add_edge("swarm_worker", "finalize")
 
-    # Exit: reflect after finalize when both memory and a reflector are present.
+    # Reflection (if enabled) is the last logical step before output.
     if memory is not None and reflector is not None:
         g.add_node("reflect", make_reflect(ctx))
         g.add_edge("finalize", "reflect")
-        g.add_edge("reflect", END)
+        exit_node = "reflect"
     else:
-        g.add_edge("finalize", END)
+        exit_node = "finalize"
+
+    # Guardrails wrap the whole graph: screen input up front, redact output at the end.
+    if guardrails is not None:
+        g.add_node("guard_input", make_guard_input(ctx))
+        g.add_node("guard_output", make_guard_output(ctx))
+        g.add_edge(START, "guard_input")
+        g.add_conditional_edges(
+            "guard_input",
+            route_after_guard_input,
+            {"blocked": END, "proceed": entry_node},
+        )
+        g.add_edge(exit_node, "guard_output")
+        g.add_edge("guard_output", END)
+    else:
+        g.add_edge(START, entry_node)
+        g.add_edge(exit_node, END)
 
     return g.compile(checkpointer=checkpointer)

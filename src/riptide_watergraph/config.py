@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Stage 4: multi-tenancy + cost attribution.
     tenant_id: str = "default"
     data_dir: str = ".riptide_watergraph"  # base dir for per-tenant memory + usage log
+    # Phase D: per-tenant spend ceiling in USD (0 = unlimited). Runs are refused once a
+    # tenant's accumulated cost reaches this.
+    tenant_budget_usd: float = 0.0
 
     def tenant_memory_path(self, tenant_id: str) -> str:
         """Per-tenant memory namespace so lessons never leak across tenants."""

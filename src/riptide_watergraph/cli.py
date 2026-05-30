@@ -18,6 +18,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
 from .config import get_settings
+from .evaluation import EvalRunner
 from .gateway import DemoGateway, LiteLLMGateway
 from .graph import build_graph
 from .guardrails import default_guardrails
@@ -180,6 +181,21 @@ def _show_costs() -> int:
     return 0
 
 
+def _run_eval(offline: bool) -> int:
+    report = EvalRunner(offline=offline).run()
+    print(f"{'task':<14}{'pass':>6}{'mode':>10}{'tool_valid':>12}  notes")
+    print("-" * 60)
+    for r in report.results:
+        rate = "-" if r.tool_valid_rate is None else f"{r.tool_valid_rate:.0%}"
+        mark = "PASS" if r.passed else "FAIL"
+        print(f"{r.task_id:<14}{mark:>6}{r.mode:>10}{rate:>12}  {r.notes}")
+    print("-" * 60)
+    print(f" pass rate: {report.n_passed}/{report.n_total} = {report.pass_rate:.0%}")
+    print(f" routing: {report.modes}; blocked: {report.blocked}; "
+          f"self-learning recall: {report.learning_recall}")
+    return 0 if report.pass_rate == 1.0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="riptide-watergraph")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -201,6 +217,10 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("costs", help="Show the per-tenant cost dashboard.")
 
+    eval_p = sub.add_parser("eval", help="Run the evaluation suite and report metrics.")
+    eval_p.add_argument("--offline", action="store_true",
+                        help="Evaluate with the deterministic offline gateway.")
+
     args = parser.parse_args(argv)
     if args.command == "run":
         return _run_task(
@@ -214,6 +234,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "costs":
         return _show_costs()
+    if args.command == "eval":
+        return _run_eval(args.offline)
     parser.print_help()
     return 1
 

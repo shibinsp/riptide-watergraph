@@ -37,6 +37,9 @@ class DemoGateway(ModelGateway):
         if "reflection module" in system:
             return CompletionResult(content=self._reflect(user))
 
+        if "planning composer" in system:
+            return CompletionResult(content=self._compose(user))
+
         if "planning orchestrator" in system:
             return CompletionResult(content=json.dumps(self._plan(user)))
 
@@ -99,6 +102,26 @@ class DemoGateway(ModelGateway):
     @staticmethod
     def _finalize(user: str) -> str:
         return "(offline) Task complete. See worker results above."
+
+    @staticmethod
+    def _compose(task: str) -> str:
+        """Deterministic composer: 'then' => sequential waves, 'and'/',' => parallel."""
+        segments = [s.strip() for s in re.split(r"\s+then\s+", task, flags=re.I) if s.strip()]
+        plan: list[str] = []
+        deps: list[list[int]] = []
+        prev: list[int] = []
+        for seg in segments:
+            parts = [p.strip() for p in re.split(r"\s+and\s+|,\s*", seg, flags=re.I) if p.strip()]
+            current: list[int] = []
+            for part in parts:
+                idx = len(plan)
+                plan.append(part)
+                deps.append(list(prev))  # depends on all of the previous wave
+                current.append(idx)
+            prev = current
+        mode = "swarm" if len(plan) >= 2 else "single"
+        subtasks = [{"task": plan[i], "depends_on": deps[i]} for i in range(len(plan))]
+        return json.dumps({"mode": mode, "subtasks": subtasks})
 
     @staticmethod
     def _reflect(user: str) -> str:

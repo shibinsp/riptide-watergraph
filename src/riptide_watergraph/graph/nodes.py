@@ -67,7 +67,26 @@ def _empty_metrics() -> dict[str, Any]:
         "tool_calls_total": 0,
         "tool_calls_valid": 0,
         "failures": {"unknown_tool": 0, "bad_json": 0, "schema_violation": 0},
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
+
+
+def _add_usage(metrics: dict[str, Any], result: Any) -> None:
+    """Fold a completion's real token usage into the metrics accumulator."""
+    usage = getattr(result, "usage", None) or {}
+    agg = metrics.setdefault(
+        "usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    )
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        agg[key] += int(usage.get(key, 0) or 0)
+
+
+def _safe_invoke(ctx: GraphContext, name: str, arguments: dict[str, Any]) -> str:
+    """Invoke a tool, returning an error string instead of crashing on failure."""
+    try:
+        return str(_run(ctx.registry.invoke(name, arguments)))
+    except Exception as exc:  # noqa: BLE001 - isolate tool failures from the graph
+        return f"tool {name!r} failed: {type(exc).__name__}: {exc}"
 
 
 def _parse_tool_call(
@@ -125,10 +144,12 @@ def make_orchestrator(ctx: GraphContext):
             result = _run(ctx.gateway.complete(model=ctx.model, messages=[sys, usr]))
 
             plan = _coerce_plan(result.content, task)
+            metrics = _empty_metrics()
+            _add_usage(metrics, result)
             return {
                 "plan": plan,
                 "cursor": 0,
-                "metrics": _empty_metrics(),
+                "metrics": metrics,
                 "swarm_decision": decision.model_dump(),
                 "messages": [{"role": "system", "content": f"plan={plan}"}],
             }
@@ -172,6 +193,7 @@ def make_worker(ctx: GraphContext):
                     model=ctx.model, messages=[sys, usr], tools=tools
                 )
             )
+            _add_usage(metrics, result)
 
             if not result.tool_calls:
                 # Direct answer — record and advance.
@@ -214,11 +236,10 @@ def make_worker(ctx: GraphContext):
                     "metrics": metrics,
                 }
 
-            # Read-only tool: execute inline.
-            tool_result = _run(ctx.registry.invoke(name, arguments))
+            # Read-only tool: execute inline (errors isolated, not crashing the run).
             out = {
                 "subtask": subtask,
-                "output": str(tool_result),
+                "output": _safe_invoke(ctx, name, arguments),
                 "tool_calls": [call],
             }
             return {"results": [out], "cursor": cursor + 1, "metrics": metrics}
@@ -265,6 +286,7 @@ def make_swarm_worker(ctx: GraphContext):
 
         results: list[WorkerResult] = []
         for subtask, result in pairs:
+            _add_usage(metrics, result)
             if not result.tool_calls:
                 results.append(
                     {"subtask": subtask, "output": result.content or "", "tool_calls": []}
@@ -283,7 +305,7 @@ def make_swarm_worker(ctx: GraphContext):
             elif ctx.registry.get(name).side_effecting:
                 output = f"{name!r} needs approval; rerun this subtask in single mode"
             else:
-                output = str(_run(ctx.registry.invoke(name, arguments)))
+                output = _safe_invoke(ctx, name, arguments)
             results.append(
                 {"subtask": subtask, "output": output, "tool_calls": [call_obj]}
             )
@@ -324,6 +346,7 @@ def make_finalize(ctx: GraphContext):
 
     def finalize(state: OrchestratorState) -> dict[str, Any]:
         results = state.get("results") or []
+        metrics = state.get("metrics") or _empty_metrics()
         with span("finalize", n_results=len(results)):
             transcript = "\n".join(
                 f"- {r['subtask']}: {r['output']}" for r in results
@@ -337,8 +360,9 @@ def make_finalize(ctx: GraphContext):
                 content=f"Task: {state['task']}\n\nResults:\n{transcript}",
             )
             result = _run(ctx.gateway.complete(model=ctx.model, messages=[sys, usr]))
+            _add_usage(metrics, result)
             answer = result.content or transcript
-            return {"final_answer": answer}
+            return {"final_answer": answer, "metrics": metrics}
 
     return finalize
 
@@ -352,6 +376,7 @@ def make_recall(ctx: GraphContext):
     """Retrieve relevant past lessons and stage them for prompt injection."""
 
     def recall(state: OrchestratorState) -> dict[str, Any]:
+        assert ctx.memory is not None  # builder only adds this node when memory is set
         task = state["task"]
         with span("recall", task=task):
             items = _run(ctx.memory.retrieve(task, k=ctx.recall_k))
@@ -365,12 +390,13 @@ def make_reflect(ctx: GraphContext):
     """Judge the outcome and distill lessons into long-term memory."""
 
     def reflect(state: OrchestratorState) -> dict[str, Any]:
+        assert ctx.reflector is not None and ctx.memory is not None  # builder invariant
         success = _compute_success(state)
         with span("reflect", success=success):
             trajectory = Trajectory(
                 task=state["task"],
                 plan=state.get("plan") or [],
-                results=list(state.get("results") or []),
+                results=[dict(r) for r in (state.get("results") or [])],
                 success=success,
                 metrics=state.get("metrics") or {},
                 session_id=state.get("session_id", ""),
@@ -404,6 +430,7 @@ def make_guard_input(ctx: GraphContext):
     """Screen the incoming task: block injections, redact PII before it spreads."""
 
     def guard_input(state: OrchestratorState) -> dict[str, Any]:
+        assert ctx.guardrails is not None  # builder only adds this node with guardrails
         task = state["task"]
         with span("guard_input"):
             result = _run(ctx.guardrails.run(task, stage="input"))
@@ -426,6 +453,7 @@ def make_guard_output(ctx: GraphContext):
     """Screen the final answer: redact any PII before it reaches the user."""
 
     def guard_output(state: OrchestratorState) -> dict[str, Any]:
+        assert ctx.guardrails is not None  # builder only adds this node with guardrails
         answer = state.get("final_answer") or ""
         with span("guard_output"):
             result = _run(ctx.guardrails.run(answer, stage="output"))
@@ -490,8 +518,7 @@ def _resolve_pending(
 
     if approval.get("approved"):
         with span("worker.execute_approved", tool=name):
-            tool_result = _run(ctx.registry.invoke(name, arguments))
-            output = str(tool_result)
+            output = _safe_invoke(ctx, name, arguments)
     else:
         output = f"action {name!r} rejected by human"
 

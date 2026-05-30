@@ -18,7 +18,9 @@ from .nodes import (
     make_orchestrator,
     make_recall,
     make_reflect,
+    make_swarm_worker,
     make_worker,
+    route_after_orchestrator,
     route_after_worker,
 )
 from .state import OrchestratorState
@@ -57,6 +59,7 @@ def build_graph(
     g: StateGraph = StateGraph(OrchestratorState)
     g.add_node("orchestrator", make_orchestrator(ctx))
     g.add_node("worker", make_worker(ctx))
+    g.add_node("swarm_worker", make_swarm_worker(ctx))
     g.add_node("human_approval", make_human_approval(ctx))
     g.add_node("finalize", make_finalize(ctx))
 
@@ -68,7 +71,12 @@ def build_graph(
     else:
         g.add_edge(START, "orchestrator")
 
-    g.add_edge("orchestrator", "worker")
+    # The composer's decision routes to parallel swarm or sequential single-agent.
+    g.add_conditional_edges(
+        "orchestrator",
+        route_after_orchestrator,
+        {"swarm_worker": "swarm_worker", "worker": "worker"},
+    )
     g.add_conditional_edges(
         "worker",
         route_after_worker,
@@ -80,6 +88,8 @@ def build_graph(
     )
     # After approval, return to worker, which resolves the pending action.
     g.add_edge("human_approval", "worker")
+    # The swarm handles all subtasks in one parallel pass, then finalizes.
+    g.add_edge("swarm_worker", "finalize")
 
     # Exit: reflect after finalize when both memory and a reflector are present.
     if memory is not None and reflector is not None:

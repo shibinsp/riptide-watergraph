@@ -54,6 +54,29 @@ def write_note(path: str, text: str) -> str:
     return f"wrote {len(text)} chars to {p}"
 
 
+# --- additional read-only tools (give on-demand retrieval something to rank) ---
+
+
+def word_count(text: str) -> str:
+    """Count the words in a piece of text."""
+    return str(len(text.split()))
+
+
+def uppercase(text: str) -> str:
+    """Convert text to upper case."""
+    return text.upper()
+
+
+def reverse_text(text: str) -> str:
+    """Reverse the characters of a string."""
+    return text[::-1]
+
+
+def web_search(query: str) -> str:
+    """Offline stand-in for a web search lookup."""
+    return f"(stub) top result for {query!r}"
+
+
 CALCULATOR_SPEC = ToolSpec(
     name="calculator",
     description="Evaluate a basic arithmetic expression (e.g. '21 * 2').",
@@ -84,9 +107,51 @@ WRITE_NOTE_SPEC = ToolSpec(
 )
 
 
+def _text_tool(name: str, description: str, handler) -> ToolSpec:
+    return ToolSpec(
+        name=name,
+        description=description,
+        json_schema={
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+            "additionalProperties": False,
+        },
+        side_effecting=False,
+        handler=handler,
+    )
+
+
+WORD_COUNT_SPEC = _text_tool("word_count", "Count the words in a piece of text.", word_count)
+UPPERCASE_SPEC = _text_tool("uppercase", "Convert text to upper case.", uppercase)
+REVERSE_TEXT_SPEC = _text_tool("reverse_text", "Reverse the characters of a string.", reverse_text)
+
+WEB_SEARCH_SPEC = ToolSpec(
+    name="web_search",
+    description="Search the web for a query and return the top result.",
+    json_schema={
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+    side_effecting=False,
+    handler=web_search,
+)
+
+ALL_SPECS = [
+    CALCULATOR_SPEC,
+    WRITE_NOTE_SPEC,
+    WORD_COUNT_SPEC,
+    UPPERCASE_SPEC,
+    REVERSE_TEXT_SPEC,
+    WEB_SEARCH_SPEC,
+]
+
+
 def default_registry() -> StaticToolRegistry:
     """A registry preloaded with the example tools."""
     reg = StaticToolRegistry()
-    reg.register(CALCULATOR_SPEC)
-    reg.register(WRITE_NOTE_SPEC)
+    for spec in ALL_SPECS:
+        reg.register(spec)
     return reg

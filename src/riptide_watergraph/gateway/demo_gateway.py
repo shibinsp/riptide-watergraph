@@ -34,6 +34,9 @@ class DemoGateway(ModelGateway):
         system = next((m.content or "" for m in messages if m.role == "system"), "")
         user = next((m.content or "" for m in messages if m.role == "user"), "")
 
+        if "You are a critic" in system:
+            return CompletionResult(content=self._critic(user))
+
         if "reflection module" in system:
             return CompletionResult(content=self._reflect(user))
 
@@ -122,6 +125,16 @@ class DemoGateway(ModelGateway):
         mode = "swarm" if len(plan) >= 2 else "single"
         subtasks = [{"task": plan[i], "depends_on": deps[i]} for i in range(len(plan))]
         return json.dumps({"mode": mode, "subtasks": subtasks})
+
+    @staticmethod
+    def _critic(user: str) -> str:
+        """Offline critic: fail results that look invalid/empty, else pass."""
+        result = user.split("Result:", 1)[1].strip() if "Result:" in user else user
+        low = result.lower()
+        bad = (not low) or any(
+            w in low for w in ("invalid", "failed", "error", "needs approval")
+        )
+        return json.dumps({"verdict": "fail" if bad else "pass", "reason": "offline"})
 
     @staticmethod
     def _reflect(user: str) -> str:

@@ -40,6 +40,7 @@ class GraphContext:
     memory: Memory | None = None  # Stage 2: long-term memory (recall + reflect)
     reflector: Reflector | None = None  # Stage 2: distills lessons from trajectories
     recall_k: int = 3  # how many lessons to retrieve and inject
+    tool_k: int = 4  # Stage 3: how many tools to retrieve on demand per subtask
 
 
 def _lessons_block(state: OrchestratorState) -> str:
@@ -106,8 +107,8 @@ def make_orchestrator(ctx: GraphContext):
     def orchestrator(state: OrchestratorState) -> dict[str, Any]:
         task = state["task"]
         with span("orchestrator", task=task):
-            # Consult the (stubbed) cost-aware composer for completeness.
-            _run(ctx.composer.decide(task))
+            # Cost-aware composition decision (single vs swarm) for this task.
+            decision = _run(ctx.composer.decide(task))
 
             sys = Message(
                 role="system",
@@ -126,6 +127,7 @@ def make_orchestrator(ctx: GraphContext):
                 "plan": plan,
                 "cursor": 0,
                 "metrics": _empty_metrics(),
+                "swarm_decision": decision.model_dump(),
                 "messages": [{"role": "system", "content": f"plan={plan}"}],
             }
 
@@ -160,7 +162,9 @@ def make_worker(ctx: GraphContext):
                 ),
             )
             usr = Message(role="user", content=subtask)
-            tools = ctx.registry.openai_schemas()
+            # On-demand tool retrieval: only the most relevant tools enter context.
+            specs = _run(ctx.registry.retrieve(subtask, k=ctx.tool_k))
+            tools = [s.to_openai_schema() for s in specs]
             result = _run(
                 ctx.gateway.complete(
                     model=ctx.model, messages=[sys, usr], tools=tools
@@ -218,6 +222,73 @@ def make_worker(ctx: GraphContext):
             return {"results": [out], "cursor": cursor + 1, "metrics": metrics}
 
     return worker
+
+
+def make_swarm_worker(ctx: GraphContext):
+    """Execute all subtasks concurrently (Stage 3 swarm mode).
+
+    Used when the composer chose ``swarm``: subtasks are independent and read-only, so
+    their (latency-dominant) model calls run via ``asyncio.gather``. Side-effecting
+    tools are NOT executed here — the composer routes approval-needing tasks to the
+    serial single-agent path instead.
+    """
+
+    def swarm_worker(state: OrchestratorState) -> dict[str, Any]:
+        plan = state.get("plan") or []
+        metrics = state.get("metrics") or _empty_metrics()
+        preamble = _lessons_block(state)
+
+        async def call(subtask: str):
+            sys = Message(
+                role="system",
+                content=(
+                    preamble
+                    + "You are a worker on one independent subtask. Use a tool if "
+                    "helpful; otherwise answer directly and concisely."
+                ),
+            )
+            usr = Message(role="user", content=subtask)
+            specs = await ctx.registry.retrieve(subtask, k=ctx.tool_k)
+            tools = [s.to_openai_schema() for s in specs]
+            result = await ctx.gateway.complete(
+                model=ctx.model, messages=[sys, usr], tools=tools
+            )
+            return subtask, result
+
+        async def run_all():
+            return await asyncio.gather(*(call(s) for s in plan))
+
+        with span("swarm_worker", n_subtasks=len(plan)):
+            pairs = _run(run_all())
+
+        results: list[WorkerResult] = []
+        for subtask, result in pairs:
+            if not result.tool_calls:
+                results.append(
+                    {"subtask": subtask, "output": result.content or "", "tool_calls": []}
+                )
+                continue
+            call_obj = result.tool_calls[0]
+            _id, name, arguments, valid, reason = _parse_tool_call(ctx, call_obj)
+            metrics["tool_calls_total"] += 1
+            if valid:
+                metrics["tool_calls_valid"] += 1
+            elif reason in metrics["failures"]:
+                metrics["failures"][reason] += 1
+
+            if not valid:
+                output = f"invalid tool call ({reason}) for {name!r}"
+            elif ctx.registry.get(name).side_effecting:
+                output = f"{name!r} needs approval; rerun this subtask in single mode"
+            else:
+                output = str(_run(ctx.registry.invoke(name, arguments)))
+            results.append(
+                {"subtask": subtask, "output": output, "tool_calls": [call_obj]}
+            )
+
+        return {"results": results, "cursor": len(plan), "metrics": metrics}
+
+    return swarm_worker
 
 
 def make_human_approval(ctx: GraphContext):
@@ -325,6 +396,18 @@ def _compute_success(state: OrchestratorState) -> bool:
 # --------------------------------------------------------------------------- #
 # Routing
 # --------------------------------------------------------------------------- #
+
+
+def route_after_orchestrator(state: OrchestratorState) -> str:
+    """orchestrator -> swarm_worker (parallel) | worker (sequential).
+
+    Swarm only when the composer chose it AND the plan actually has >= 2 subtasks.
+    """
+    decision = state.get("swarm_decision") or {}
+    plan = state.get("plan") or []
+    if decision.get("mode") == "swarm" and len(plan) >= 2:
+        return "swarm_worker"
+    return "worker"
 
 
 def route_after_worker(state: OrchestratorState) -> str:

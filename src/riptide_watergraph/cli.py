@@ -59,6 +59,7 @@ def _run_task(
     guardrails_on: bool = True,
     llm_composer: bool = False,
     critic: bool = False,
+    supervisor: bool = False,
 ) -> int:
     settings = get_settings()
     init_tracing(settings)
@@ -116,6 +117,7 @@ def _run_task(
             planner_model=planner_model,
             worker_model=worker_model,
             enable_critic=critic,
+            enable_supervisor=supervisor,
         )
 
         print(f" tenant={tenant_id} thread={thread_id}")
@@ -271,6 +273,9 @@ def main(argv: list[str] | None = None) -> int:
                             "of the heuristic one.")
     run_p.add_argument("--critic", action="store_true",
                        help="Add a critic agent that verifies each subtask result.")
+    run_p.add_argument("--supervisor", action="store_true",
+                       help="Add a supervisor that re-plans corrective subtasks (implies "
+                            "--critic).")
 
     sub.add_parser("costs", help="Show the per-tenant cost dashboard.")
 
@@ -294,6 +299,7 @@ def main(argv: list[str] | None = None) -> int:
             guardrails_on=not args.no_guardrails,
             llm_composer=args.llm_composer,
             critic=args.critic,
+            supervisor=args.supervisor,
         )
     if args.command == "costs":
         return _show_costs()

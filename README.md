@@ -146,6 +146,20 @@ clean instead of degrading. Improvement **without any fine-tuning** (the Reflexi
 ReasoningBank pattern). See [`test_self_learning.py`](tests/test_self_learning.py) and
 [`test_embedding.py`](tests/test_embedding.py).
 
+### Memory at scale (pgvector)
+
+`JsonFileMemory` is great for a single process; for scale, `PgVectorMemory` is a drop-in
+that stores records in Postgres and does dense similarity search with the pgvector
+extension. Install `.[pgvector]`, then:
+
+```python
+from riptide_watergraph.memory import PgVectorMemory, LiteLLMEmbedding
+memory = PgVectorMemory("postgresql://localhost/riptide", LiteLLMEmbedding(), dim=1536)
+# pass `memory=` to build_graph — everything else is unchanged.
+```
+
+`psycopg` is imported lazily, so the core package never requires it.
+
 ## Dynamic swarm (Stage 3)
 
 The orchestrator asks a cost-aware **composer** how to run each task. `HeuristicSwarmComposer`

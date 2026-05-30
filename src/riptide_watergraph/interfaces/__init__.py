@@ -8,6 +8,7 @@ packages (``gateway``, ``memory``, ``tools``, ``swarm``).
 from .agent import Agent
 from .gateway import CompletionResult, Message, ModelGateway
 from .memory import Memory, MemoryRecord, RetrievedItem
+from .reflector import Reflector, Trajectory
 from .swarm import SwarmComposer, SwarmDecision, TeamMember
 from .tools import ToolRegistry, ToolSpec
 
@@ -19,6 +20,8 @@ __all__ = [
     "Memory",
     "MemoryRecord",
     "RetrievedItem",
+    "Reflector",
+    "Trajectory",
     "ToolRegistry",
     "ToolSpec",
     "SwarmComposer",

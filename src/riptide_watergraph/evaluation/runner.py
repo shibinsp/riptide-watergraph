@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from ..gateway import DemoGateway, LiteLLMGateway
 from ..graph import build_graph
 from ..guardrails import default_guardrails
-from ..memory import InMemoryMemory
+from ..memory import HashingEmbedding, InMemoryMemory, LexicalOverlapReranker
 from ..memory.reflection import LLMReflector
 from ..swarm import HeuristicSwarmComposer
 from ..tools import default_registry
@@ -61,7 +61,9 @@ class EvalRunner:
 
     def run(self, suite: list[EvalTask] | None = None) -> EvalReport:
         suite = suite or default_suite()
-        memory = InMemoryMemory()
+        memory = InMemoryMemory(
+            embedding=HashingEmbedding(), reranker=LexicalOverlapReranker()
+        )
         graph = self._build(memory)
 
         results = [self._run_task(graph, t) for t in suite]
@@ -117,7 +119,9 @@ class EvalRunner:
 
     def _probe_learning(self) -> bool:
         """Run one task twice; the second run should recall the first run's lesson."""
-        memory = InMemoryMemory()
+        memory = InMemoryMemory(
+            embedding=HashingEmbedding(), reranker=LexicalOverlapReranker()
+        )
         graph = self._build(memory)
         cfg1 = {"configurable": {"thread_id": "probe-1"}}
         cfg2 = {"configurable": {"thread_id": "probe-2"}}

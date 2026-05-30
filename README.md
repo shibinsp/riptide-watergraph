@@ -111,6 +111,16 @@ riptide-watergraph run "Summarize and save a note about water"   # drop --offlin
 Runnable library-API examples live in [`examples/`](examples); see
 [CONTRIBUTING.md](CONTRIBUTING.md) to hack on it and [CHANGELOG.md](CHANGELOG.md) for history.
 
+### Deploy with Docker
+
+```bash
+docker build -t riptide-watergraph .
+docker run -p 8000:8000 riptide-watergraph        # GET http://localhost:8000/healthz
+# real models: docker run -e OPENAI_API_KEY=sk-... -p 8000:8000 riptide-watergraph
+```
+
+The image installs the `[server]` extra and runs `riptide serve` (uvicorn) on port 8000.
+
 ## Repository layout
 
 ```

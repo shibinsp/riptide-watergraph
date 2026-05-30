@@ -75,9 +75,16 @@ class StaticToolRegistry(ToolRegistry):
         )
         return [s.to_openai_schema() for s in specs]
 
-    async def retrieve(self, query: str, *, k: int = 5) -> list[ToolSpec]:
-        """Return the top-k tools most relevant to ``query`` (BM25 over name+desc)."""
+    async def retrieve(
+        self, query: str, *, k: int = 5, allowed: set[str] | None = None
+    ) -> list[ToolSpec]:
+        """Return the top-k tools most relevant to ``query`` (BM25 over name+desc).
+
+        If ``allowed`` is given, only those tool names are considered (role scoping).
+        """
         specs = self.all_specs()
+        if allowed is not None:
+            specs = [s for s in specs if s.name in allowed]
         if not specs or k <= 0:
             return specs[:k] if k > 0 else []
         if len(specs) <= k:

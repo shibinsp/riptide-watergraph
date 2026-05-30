@@ -58,6 +58,7 @@ def _run_task(
     tenant_id: str = "default",
     guardrails_on: bool = True,
     llm_composer: bool = False,
+    critic: bool = False,
 ) -> int:
     settings = get_settings()
     init_tracing(settings)
@@ -114,6 +115,7 @@ def _run_task(
             guardrails=guardrails,
             planner_model=planner_model,
             worker_model=worker_model,
+            enable_critic=critic,
         )
 
         print(f" tenant={tenant_id} thread={thread_id}")
@@ -150,6 +152,10 @@ def _print_result(result: dict, *, memory_on: bool, memory) -> None:
         print(" roles: " + ", ".join(
             f"{plan[i] if i < len(plan) else '?'} -> {roles[i]}" for i in range(len(roles))
         ))
+    verdicts = result.get("verdicts") or []
+    if verdicts:
+        n_pass = sum(1 for v in verdicts if v.get("verdict") == "pass")
+        print(f" critic: {n_pass}/{len(verdicts)} subtasks verified")
 
     for tag in ("guard_violations", "guard_violations_out"):
         if result.get(tag):
@@ -263,6 +269,8 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--llm-composer", action="store_true",
                        help="Use the LLM swarm composer (plan + dependencies) instead "
                             "of the heuristic one.")
+    run_p.add_argument("--critic", action="store_true",
+                       help="Add a critic agent that verifies each subtask result.")
 
     sub.add_parser("costs", help="Show the per-tenant cost dashboard.")
 
@@ -285,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
             tenant_id=args.tenant,
             guardrails_on=not args.no_guardrails,
             llm_composer=args.llm_composer,
+            critic=args.critic,
         )
     if args.command == "costs":
         return _show_costs()

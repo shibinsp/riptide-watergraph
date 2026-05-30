@@ -20,6 +20,7 @@ from typing import Any
 
 from langgraph.types import interrupt
 
+from ..guardrails.pipeline import GuardrailPipeline
 from ..interfaces.gateway import Message, ModelGateway
 from ..interfaces.memory import Memory
 from ..interfaces.reflector import Reflector, Trajectory
@@ -41,6 +42,7 @@ class GraphContext:
     reflector: Reflector | None = None  # Stage 2: distills lessons from trajectories
     recall_k: int = 3  # how many lessons to retrieve and inject
     tool_k: int = 4  # Stage 3: how many tools to retrieve on demand per subtask
+    guardrails: GuardrailPipeline | None = None  # Stage 4: input/output safety
 
 
 def _lessons_block(state: OrchestratorState) -> str:
@@ -394,8 +396,57 @@ def _compute_success(state: OrchestratorState) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# Stage 4: guardrails
+# --------------------------------------------------------------------------- #
+
+
+def make_guard_input(ctx: GraphContext):
+    """Screen the incoming task: block injections, redact PII before it spreads."""
+
+    def guard_input(state: OrchestratorState) -> dict[str, Any]:
+        task = state["task"]
+        with span("guard_input"):
+            result = _run(ctx.guardrails.run(task, stage="input"))
+            if not result.allowed:
+                reasons = ", ".join(result.violations) or "policy violation"
+                return {
+                    "blocked": True,
+                    "final_answer": f"[blocked by guardrails] {reasons}",
+                    "guard_violations": result.violations,
+                }
+            update: dict[str, Any] = {"guard_violations": result.violations}
+            if result.transformed_text is not None:
+                update["task"] = result.transformed_text  # e.g. PII redacted
+            return update
+
+    return guard_input
+
+
+def make_guard_output(ctx: GraphContext):
+    """Screen the final answer: redact any PII before it reaches the user."""
+
+    def guard_output(state: OrchestratorState) -> dict[str, Any]:
+        answer = state.get("final_answer") or ""
+        with span("guard_output"):
+            result = _run(ctx.guardrails.run(answer, stage="output"))
+            update: dict[str, Any] = {}
+            if result.transformed_text is not None:
+                update["final_answer"] = result.transformed_text
+            if result.violations:
+                update["guard_violations_out"] = result.violations
+            return update
+
+    return guard_output
+
+
+# --------------------------------------------------------------------------- #
 # Routing
 # --------------------------------------------------------------------------- #
+
+
+def route_after_guard_input(state: OrchestratorState) -> str:
+    """guard_input -> blocked (straight to END) | proceed."""
+    return "blocked" if state.get("blocked") else "proceed"
 
 
 def route_after_orchestrator(state: OrchestratorState) -> str:

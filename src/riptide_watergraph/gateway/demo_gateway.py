@@ -33,6 +33,9 @@ class DemoGateway(ModelGateway):
         system = next((m.content or "" for m in messages if m.role == "system"), "")
         user = next((m.content or "" for m in messages if m.role == "user"), "")
 
+        if "reflection module" in system:
+            return CompletionResult(content=self._reflect(user))
+
         if "planning orchestrator" in system:
             return CompletionResult(content=json.dumps(self._plan(user)))
 
@@ -80,6 +83,20 @@ class DemoGateway(ModelGateway):
     @staticmethod
     def _finalize(user: str) -> str:
         return "(offline) Task complete. See worker results above."
+
+    @staticmethod
+    def _reflect(user: str) -> str:
+        # Distill a deterministic lesson from the task line in the trajectory.
+        task = ""
+        for line in user.splitlines():
+            if line.lower().startswith("task:"):
+                task = line.split(":", 1)[1].strip()
+                break
+        lesson = (
+            f"For tasks like '{task}', decompose into one concrete subtask and use "
+            "the most specific available tool."
+        )
+        return json.dumps({"lesson": lesson, "tags": ["offline", "demo"]})
 
 
 def _call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:

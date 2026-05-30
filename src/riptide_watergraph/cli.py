@@ -21,7 +21,7 @@ from .graph import build_graph
 from .memory import JsonFileMemory
 from .memory.reflection import LLMReflector
 from .observability.tracing import init_tracing
-from .swarm import SingleAgentComposer
+from .swarm import HeuristicSwarmComposer, SingleAgentComposer
 from .tools import default_registry
 
 
@@ -36,7 +36,12 @@ def _prompt_approval(payload: dict[str, Any]) -> bool:
 
 
 def _run_task(
-    task: str, *, auto_approve: bool, offline: bool = False, memory_on: bool = True
+    task: str,
+    *,
+    auto_approve: bool,
+    offline: bool = False,
+    memory_on: bool = True,
+    single: bool = False,
 ) -> int:
     settings = get_settings()
     init_tracing(settings)
@@ -49,7 +54,11 @@ def _run_task(
         else LiteLLMGateway(default_model=settings.riptide_watergraph_model)
     )
     registry = default_registry()
-    composer = SingleAgentComposer(model=settings.riptide_watergraph_model)
+    composer = (
+        SingleAgentComposer(model=settings.riptide_watergraph_model)
+        if single
+        else HeuristicSwarmComposer(model=settings.riptide_watergraph_model)
+    )
 
     # Stage 2: persistent memory + reflection (lessons accumulate across runs).
     memory = JsonFileMemory(settings.memory_path) if memory_on else None
@@ -75,6 +84,11 @@ def _run_task(
 
         print(f" thread={thread_id}")
         result = graph.invoke({"task": task, "session_id": thread_id}, config)
+
+        decision = result.get("swarm_decision") or {}
+        if decision:
+            print(f" composition: {decision.get('mode')} "
+                  f"(parallelism={decision.get('parallelism')}) - {decision.get('rationale')}")
 
         # Resume loop: handle one or more approval interrupts.
         while "__interrupt__" in result:
@@ -128,6 +142,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Disable long-term memory recall + reflection for this run.",
     )
+    run_p.add_argument(
+        "--single",
+        action="store_true",
+        help="Force a single agent (skip the cost-aware swarm composer).",
+    )
 
     args = parser.parse_args(argv)
     if args.command == "run":
@@ -136,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
             auto_approve=args.auto_approve,
             offline=args.offline,
             memory_on=not args.no_memory,
+            single=args.single,
         )
     parser.print_help()
     return 1

@@ -26,7 +26,7 @@ from .interfaces import (
     Trajectory,
 )
 from .memory import InMemoryMemory, JsonFileMemory, LLMReflector, MemoryType
-from .swarm import SingleAgentComposer
+from .swarm import HeuristicSwarmComposer, SingleAgentComposer
 from .tools import StaticToolRegistry, default_registry
 
 __all__ = [
@@ -41,6 +41,7 @@ __all__ = [
     "StaticToolRegistry",
     "default_registry",
     "SingleAgentComposer",
+    "HeuristicSwarmComposer",
     # interfaces
     "Agent",
     "ModelGateway",

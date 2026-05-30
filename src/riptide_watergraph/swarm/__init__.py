@@ -1,5 +1,6 @@
-"""Swarm composer implementations (Stage 1: single-agent stub)."""
+"""Swarm composer implementations."""
 
+from .heuristic_composer import HeuristicSwarmComposer
 from .static_composer import SingleAgentComposer
 
-__all__ = ["SingleAgentComposer"]
+__all__ = ["SingleAgentComposer", "HeuristicSwarmComposer"]

@@ -43,3 +43,9 @@ class OrchestratorState(TypedDict, total=False):
 
     # --- Stage 3: dynamic swarm composition ---
     swarm_decision: dict[str, Any]  # the composer's single-vs-swarm decision
+
+    # --- Stage 4: guardrails + multi-tenancy ---
+    tenant_id: str  # tenant this run belongs to (isolation + cost attribution)
+    blocked: bool  # set by guard_input when the request is refused
+    guard_violations: list[str]  # input-side guardrail findings
+    guard_violations_out: list[str]  # output-side guardrail findings

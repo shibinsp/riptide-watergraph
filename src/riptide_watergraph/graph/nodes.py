@@ -27,6 +27,7 @@ from ..interfaces.reflector import Reflector, Trajectory
 from ..interfaces.swarm import SwarmComposer
 from ..memory.types import MemoryType
 from ..observability.tracing import span
+from ..swarm.roles import get_role, role_for
 from ..tools.registry import StaticToolRegistry, ToolValidationError
 from .state import OrchestratorState, WorkerResult
 from .waves import topological_levels
@@ -164,9 +165,16 @@ def make_orchestrator(ctx: GraphContext):
                 plan = _coerce_plan(result.content, task)
                 dependencies = [[] for _ in plan]
 
+            # Assign a specialist role per subtask (composer-provided or by keyword).
+            if decision.roles and len(decision.roles) == len(plan):
+                roles = decision.roles
+            else:
+                roles = [role_for(s) for s in plan]
+
             return {
                 "plan": plan,
                 "dependencies": dependencies,
+                "roles": roles,
                 "cursor": 0,
                 "metrics": metrics,
                 "swarm_decision": decision.model_dump(),
@@ -194,18 +202,13 @@ def make_worker(ctx: GraphContext):
             return {}  # nothing to do; routing sends us to finalize
 
         subtask = plan[cursor]
-        with span("worker", subtask=subtask, cursor=cursor):
-            sys = Message(
-                role="system",
-                content=(
-                    _lessons_block(state)
-                    + "You are a worker. Accomplish the subtask. Use a tool if helpful; "
-                    "otherwise answer directly and concisely."
-                ),
-            )
+        role = get_role((state.get("roles") or ["generalist"] * len(plan))[cursor])
+        with span("worker", subtask=subtask, cursor=cursor, role=role.name):
+            sys = Message(role="system", content=_lessons_block(state) + role.system_prompt)
             usr = Message(role="user", content=subtask)
-            # On-demand tool retrieval: only the most relevant tools enter context.
-            specs = _run(ctx.registry.retrieve(subtask, k=ctx.tool_k))
+            # On-demand tool retrieval, scoped to the role's allowed tools.
+            allowed = set(role.tools) if role.tools is not None else None
+            specs = _run(ctx.registry.retrieve(subtask, k=ctx.tool_k, allowed=allowed))
             tools = [s.to_openai_schema() for s in specs]
             result = _run(
                 ctx.gateway.complete(
@@ -280,6 +283,7 @@ def make_swarm_worker(ctx: GraphContext):
     def swarm_worker(state: OrchestratorState) -> dict[str, Any]:
         plan = state.get("plan") or []
         deps = state.get("dependencies") or [[] for _ in plan]
+        roles = state.get("roles") or ["generalist"] * len(plan)
         metrics = state.get("metrics") or _empty_metrics()
         preamble = _lessons_block(state)
         blackboard: dict[int, str] = {}
@@ -293,17 +297,14 @@ def make_swarm_worker(ctx: GraphContext):
             return f"Context from prior steps:\n{lines}\n\n"
 
         async def call(idx: int):
+            role = get_role(roles[idx])
             sys = Message(
                 role="system",
-                content=(
-                    preamble
-                    + _context_for(idx)
-                    + "You are a worker on one subtask. Use a tool if helpful; "
-                    "otherwise answer directly and concisely."
-                ),
+                content=preamble + _context_for(idx) + role.system_prompt,
             )
             usr = Message(role="user", content=plan[idx])
-            specs = await ctx.registry.retrieve(plan[idx], k=ctx.tool_k)
+            allowed = set(role.tools) if role.tools is not None else None
+            specs = await ctx.registry.retrieve(plan[idx], k=ctx.tool_k, allowed=allowed)
             tools = [s.to_openai_schema() for s in specs]
             result = await ctx.gateway.complete(
                 model=ctx.worker_model, messages=[sys, usr], tools=tools

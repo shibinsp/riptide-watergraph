@@ -391,27 +391,89 @@ def make_finalize(ctx: GraphContext):
 
     def finalize(state: OrchestratorState) -> dict[str, Any]:
         results = state.get("results") or []
+        verdicts = state.get("verdicts") or []
         metrics = state.get("metrics") or _empty_metrics()
-        with span("finalize", n_results=len(results)):
-            transcript = "\n".join(
-                f"- {r['subtask']}: {r['output']}" for r in results
+
+        def passed(i: int) -> bool:
+            return i >= len(verdicts) or verdicts[i].get("verdict") != "fail"
+
+        verified = [r for i, r in enumerate(results) if passed(i)]
+        failed = [r for i, r in enumerate(results) if not passed(i)]
+
+        with span("finalize", n_results=len(results), n_failed=len(failed)):
+            transcript = "\n".join(f"- {r['subtask']}: {r['output']}" for r in verified)
+            note = (
+                f"\n\n{len(failed)} subtask(s) failed verification and were excluded."
+                if failed
+                else ""
             )
             sys = Message(
                 role="system",
-                content="Compose a concise final answer from the worker results.",
+                content="Compose a concise final answer from the verified worker results.",
             )
             usr = Message(
                 role="user",
-                content=f"Task: {state['task']}\n\nResults:\n{transcript}",
+                content=f"Task: {state['task']}\n\nResults:\n{transcript}{note}",
             )
             result = _run(
                 ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr])
             )
             _add_usage(metrics, result)
-            answer = result.content or transcript
+            answer = (result.content or transcript) + note
             return {"final_answer": answer, "metrics": metrics}
 
     return finalize
+
+
+def make_critic(ctx: GraphContext):
+    """Adversarially verify each worker result (pass/fail) before finalize."""
+
+    def critic(state: OrchestratorState) -> dict[str, Any]:
+        results = state.get("results") or []
+        verdicts = list(state.get("verdicts") or [])
+        metrics = state.get("metrics") or _empty_metrics()
+        with span("critic", n_results=len(results)):
+            for i in range(len(verdicts), len(results)):
+                r = results[i]
+                sys = Message(
+                    role="system",
+                    content=(
+                        "You are a critic. Decide whether the subtask result is correct "
+                        "and complete. Be skeptical. Reply ONLY as JSON: "
+                        '{"verdict": "pass"|"fail", "reason": "<short>"}.'
+                    ),
+                )
+                usr = Message(
+                    role="user",
+                    content=f"Subtask: {r['subtask']}\nResult: {r['output']}",
+                )
+                res = _run(ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr]))
+                _add_usage(metrics, res)
+                verdicts.append(_parse_verdict(res.content, r))
+        return {"verdicts": verdicts, "metrics": metrics}
+
+    return critic
+
+
+def _parse_verdict(content: str | None, result: WorkerResult) -> dict[str, Any]:
+    """Parse a critic reply; fall back to a heuristic on bad/empty output."""
+    subtask = result.get("subtask", "")
+    if content:
+        text = content.strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            if "\n" in text:
+                text = text.split("\n", 1)[1]
+        try:
+            data = json.loads(text)
+            verdict = "fail" if data.get("verdict") == "fail" else "pass"
+            return {"subtask": subtask, "verdict": verdict, "reason": str(data.get("reason", ""))}
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    # Heuristic fallback: empty/error-looking output fails.
+    out = (result.get("output") or "").lower()
+    bad = (not out) or any(w in out for w in ("invalid", "failed", "error", "needs approval"))
+    return {"subtask": subtask, "verdict": "fail" if bad else "pass", "reason": "heuristic"}
 
 
 # --------------------------------------------------------------------------- #

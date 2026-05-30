@@ -108,6 +108,9 @@ cp .env.example .env             # fill OPENAI_API_KEY / model + (optional) Lang
 riptide-watergraph run "Summarize and save a note about water"   # drop --offline
 ```
 
+Runnable library-API examples live in [`examples/`](examples); see
+[CONTRIBUTING.md](CONTRIBUTING.md) to hack on it and [CHANGELOG.md](CHANGELOG.md) for history.
+
 ## Repository layout
 
 ```

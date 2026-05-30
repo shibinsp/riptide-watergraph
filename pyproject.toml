@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "riptide-watergraph"
+version = "0.1.0"
+description = "Riptide-Watergraph - a reusable, 'like water' multi-agent framework built as a thin layer on LangGraph."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Shibin Shanmughamprem", email = "shibin.shanmughamprema@nxzen.com" }]
+keywords = ["agents", "langgraph", "multi-agent", "llm", "orchestration"]
+
+# Lean core: orchestration + memory + tools. The model provider and observability
+# stack are optional extras (imported lazily) so the skeleton installs and runs
+# offline with no heavy/optional dependencies.
+dependencies = [
+    "langgraph>=1.0,<2.0",
+    "langgraph-checkpoint-sqlite>=3.0,<4.0",
+    "langchain-core>=1.0,<2.0",
+    "pydantic>=2.9,<3.0",
+    "pydantic-settings>=2.5,<3.0",
+    "jsonschema>=4.20",
+    "typing-extensions>=4.12",
+]
+
+[project.optional-dependencies]
+# Real model gateway (any OpenAI-compatible provider, incl. local vLLM).
+litellm = ["litellm>=1.55,<2.0"]
+# Tracing backends (best-effort; the framework runs without them).
+observability = [
+    "langfuse>=3.0,<4.0",
+    "opentelemetry-sdk>=1.27,<2.0",
+    "opentelemetry-exporter-otlp>=1.27,<2.0",
+]
+# Named production seam for the memory layer (Stage 2). Not required for the skeleton.
+pgvector = [
+    "langchain-postgres>=0.0.12",
+    "psycopg[binary]>=3.2",
+]
+# Convenience: everything needed to run against a real model with tracing.
+all = ["riptide-watergraph[litellm,observability]"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff",
+    "mypy",
+]
+
+[project.scripts]
+riptide-watergraph = "riptide_watergraph.cli:main"
+riptide = "riptide_watergraph.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+riptide_watergraph = ["py.typed"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

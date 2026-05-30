@@ -7,6 +7,7 @@ response into our ``CompletionResult``.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, AsyncIterator
 
 from ..interfaces.gateway import CompletionResult, Message, ModelGateway
@@ -71,11 +72,16 @@ class LiteLLMGateway(ModelGateway):
         as_dict = resp.model_dump() if hasattr(resp, "model_dump") else dict(resp)
         choice = (as_dict.get("choices") or [{}])[0]
         msg = choice.get("message", {}) or {}
-        tool_calls = msg.get("tool_calls") or []
+        tool_calls = list(msg.get("tool_calls") or [])
+        # Some providers omit tool-call ids; assign a stable fallback so approvals and
+        # metrics never reference a None id.
+        for call in tool_calls:
+            if isinstance(call, dict) and not call.get("id"):
+                call["id"] = f"call_{uuid.uuid4().hex[:8]}"
         usage = as_dict.get("usage")
         return CompletionResult(
             content=msg.get("content"),
-            tool_calls=list(tool_calls),
+            tool_calls=tool_calls,
             raw=as_dict,
             model=as_dict.get("model", ""),
             usage=usage if isinstance(usage, dict) else None,

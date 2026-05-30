@@ -41,8 +41,10 @@ class OrchestratorState(TypedDict, total=False):
     success: bool  # outcome judged at reflection time
     stored_lessons: list[str]  # lessons written back to memory this run
 
-    # --- Stage 3: dynamic swarm composition ---
+    # --- Stage 3 / Phase C: dynamic swarm composition + dependency DAG ---
     swarm_decision: dict[str, Any]  # the composer's single-vs-swarm decision
+    dependencies: list[list[int]]  # dependencies[i] = prerequisite subtask indices
+    blackboard: dict[int, str]  # subtask index -> output, shared across waves
 
     # --- Stage 4: guardrails + multi-tenancy ---
     tenant_id: str  # tenant this run belongs to (isolation + cost attribution)

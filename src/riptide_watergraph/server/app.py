@@ -46,7 +46,7 @@ def _sse(obj: dict) -> str:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="riptide-watergraph", version="0.1.0")
+    app = FastAPI(title="riptide-watergraph", version="0.2.0")
 
     @app.get("/healthz")
     def healthz() -> dict:

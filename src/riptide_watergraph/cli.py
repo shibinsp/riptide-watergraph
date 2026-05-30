@@ -22,7 +22,7 @@ from .evaluation import EvalRunner
 from .gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from .graph import build_graph
 from .guardrails import default_guardrails
-from .memory import JsonFileMemory
+from .memory import HashingEmbedding, JsonFileMemory, LexicalOverlapReranker
 from .memory.reflection import LLMReflector
 from .observability.cost import CostTracker, UsageRecord, cost_from_usage, estimate_tokens
 from .observability.tracing import init_tracing
@@ -68,9 +68,16 @@ def _run_task(
         else HeuristicSwarmComposer(model=settings.riptide_watergraph_model)
     )
 
-    # Stage 2 + 4: per-tenant persistent memory (lessons never leak across tenants).
+    # Stage 2 + 4: per-tenant persistent memory (lessons never leak across tenants),
+    # with hybrid dense+lexical retrieval (offline embedder) and reranking.
     memory = (
-        JsonFileMemory(settings.tenant_memory_path(tenant_id)) if memory_on else None
+        JsonFileMemory(
+            settings.tenant_memory_path(tenant_id),
+            embedding=HashingEmbedding(),
+            reranker=LexicalOverlapReranker(),
+        )
+        if memory_on
+        else None
     )
     reflector = (
         LLMReflector(gateway, model=settings.riptide_watergraph_model)

@@ -2,11 +2,12 @@
 
 A reusable, enterprise-grade multi-agent framework — conceptually *like AutoGen*, but built as a **thin layer on [LangGraph](https://github.com/langchain-ai/langgraph)** rather than re-authoring the orchestration runtime. The design goal is to be **"like water"**: a layered, modular substrate where every layer is swappable behind a thin interface.
 
-> **Stages 1–2 implemented.** Stage 1: the runnable spine — orchestrator decomposes a task → worker calls a
+> **Stages 1–3 implemented.** Stage 1: the runnable spine — orchestrator decomposes a task → worker calls a
 > tool → human-approval interrupt → resume → finalize, with tracing. **Stage 2: memory + self-learning** —
 > a `recall` step injects relevant past lessons into prompts, and a `reflect` step distills new lessons into
-> persistent memory after each run. The remaining differentiators (dynamic **swarm composer**, on-demand
-> **tool registry**) are interface-stubbed seams for Stages 3–4.
+> persistent memory. **Stage 3: dynamic swarm + on-demand tools** — a cost-aware composer decides single-agent
+> vs a parallel swarm per task, and the tool registry retrieves only the most relevant tools into context.
+> Stage 4 (guardrails, multi-tenancy, cost dashboards) remains.
 
 ## Why this shape
 
@@ -18,16 +19,16 @@ The framework consumes what LangGraph already does well (durable graph execution
 
 Pure Python, one toolchain. The retrieval-ranking core (**BM25** lexical scoring + **Reciprocal Rank Fusion, k=60**) lives in [`memory/ranking.py`](src/riptide_watergraph/memory/ranking.py) behind a small, stable signature — if profiling ever shows it's a hot path at scale, those two functions can be swapped for a native implementation without touching the rest of the framework.
 
-## Layers (Stage 1 surface)
+## Layers
 
-| Layer | Stage-1 implementation | Later-stage seam |
+| Layer | Implementation | Later-stage seam |
 |---|---|---|
-| Model gateway | `LiteLLMGateway` (API-first, OpenAI-compatible) | local vLLM endpoint |
+| Model gateway | `LiteLLMGateway` (API-first, OpenAI-compatible) + `DemoGateway` | local vLLM endpoint |
 | Agent core | thin `Agent` over the gateway | typed agent core |
 | Orchestration | LangGraph orchestrator-worker graph + `SqliteSaver` | richer graphs |
 | Memory | `JsonFileMemory` (persistent) + `LLMReflector`; BM25+RRF recall, distilled lessons | Letta/Mem0 + pgvector at scale |
-| Swarm composer | `SingleAgentComposer` (cost-aware gate stubbed) | runtime team formation |
-| Tool registry | `StaticToolRegistry`; MCP seam noted | versioned + on-demand retrieval |
+| Swarm composer | `HeuristicSwarmComposer` — cost-aware single-vs-swarm gate + parallel execution | LLM-driven team formation |
+| Tool registry | `StaticToolRegistry` — versioned, on-demand BM25 retrieval | MCP interop adapter |
 | HITL | LangGraph `interrupt()` approval gate | escalation queues |
 | Observability | Langfuse via OTEL + own graph spans | eval/regression gates |
 
@@ -52,6 +53,10 @@ riptide run "compute 21 * 2" --offline      # learns a lesson
 riptide run "compute 21 * 2" --offline      # "recalled 1 lesson(s): ..."
 riptide run "compute 21 * 2" --offline --no-memory   # disable recall + reflection
 
+# Dynamic swarm: a decomposable task goes parallel; a simple one stays single.
+riptide run "search cats and count the words and uppercase the title" --offline  # -> swarm
+riptide run "compute 21 * 2" --offline --single                                  # force single
+
 # 4. Use a real model (installs the LiteLLM gateway + tracing extras)
 pip install -e ".[all]"
 cp .env.example .env             # fill OPENAI_API_KEY / model + (optional) Langfuse keys
@@ -67,9 +72,9 @@ Riptide-Watergraph/
     ├── interfaces/              # ABCs = the swappable seams (incl. Reflector)
     ├── gateway/                 # LiteLLMGateway + DemoGateway (offline)
     ├── memory/                  # JsonFileMemory, ranking, reflection, types
-    ├── tools/                   # StaticToolRegistry + example tools
-    ├── swarm/                   # SingleAgentComposer (stub)
-    ├── graph/                   # state, nodes (recall/reflect), builder (LangGraph)
+    ├── tools/                   # StaticToolRegistry (versioned, on-demand) + tools
+    ├── swarm/                   # HeuristicSwarmComposer + cost model
+    ├── graph/                   # state, nodes (recall/reflect/swarm), builder
     ├── observability/           # OTEL + Langfuse tracing
     ├── config.py                # pydantic-settings
     └── cli.py                   # `riptide-watergraph run`
@@ -86,10 +91,23 @@ and worker prompts. Over repeated runs the lesson store grows and is reused — 
 [`test_self_learning.py`](tests/test_self_learning.py) for a deterministic proof that success
 rises across runs purely from recall + reflection.
 
+## Dynamic swarm (Stage 3)
+
+The orchestrator asks a cost-aware **composer** how to run each task. `HeuristicSwarmComposer`
+estimates independent sub-goals and picks a parallel **swarm** only when the task genuinely
+decomposes *and* needs no human-approved side effects (those serialize through the HITL gate);
+otherwise it stays a **single** agent — avoiding the multi-agent token multiplier for work that
+wouldn't benefit. In swarm mode, subtasks run concurrently (`asyncio.gather`). The decision
+carries both the chosen-mode and single-agent cost so the trade-off is visible. The **tool
+registry** retrieves only the top-k relevant tools per subtask (BM25), keeping schemas out of
+context, and supports versioned tools (`get`/`list_versions`). See
+[`test_swarm_composer.py`](tests/test_swarm_composer.py) and
+[`test_swarm_execution.py`](tests/test_swarm_execution.py).
+
 ## Roadmap
 
-- **Stage 2 ✅** — memory + reflection: persistent lessons, recall-injection, end-of-task reflection (done).
-- **Stage 3** — dynamic swarm composer + tool registry with on-demand retrieval (must beat single-agent *net of token cost*).
+- **Stage 2 ✅** — memory + reflection: persistent lessons, recall-injection, end-of-task reflection.
+- **Stage 3 ✅** — cost-aware dynamic swarm composer + on-demand, versioned tool registry.
 - **Stage 4** — guardrails, multi-tenancy, per-tenant cost dashboards, optional Temporal + SGLang; swap `JsonFileMemory` → pgvector at scale.
 
 ## License

@@ -34,6 +34,9 @@ class DemoGateway(ModelGateway):
         system = next((m.content or "" for m in messages if m.role == "system"), "")
         user = next((m.content or "" for m in messages if m.role == "user"), "")
 
+        if "You are a supervisor" in system:
+            return CompletionResult(content="[]")  # offline: no corrective re-planning
+
         if "You are a critic" in system:
             return CompletionResult(content=self._critic(user))
 

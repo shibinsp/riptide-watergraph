@@ -41,6 +41,8 @@ def build_graph(
     reflector: Reflector | None = None,
     guardrails: GuardrailPipeline | None = None,
     recall_k: int = 3,
+    planner_model: str | None = None,
+    worker_model: str | None = None,
 ):
     """Build and compile the orchestrator-worker graph.
 
@@ -58,6 +60,8 @@ def build_graph(
         registry=registry,
         composer=composer,
         model=model,
+        planner_model=planner_model or "",
+        worker_model=worker_model or "",
         memory=memory,
         reflector=reflector,
         guardrails=guardrails,

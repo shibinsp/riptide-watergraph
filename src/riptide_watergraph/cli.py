@@ -18,6 +18,8 @@ from langgraph.types import Command
 from .config import get_settings
 from .gateway import DemoGateway, LiteLLMGateway
 from .graph import build_graph
+from .memory import JsonFileMemory
+from .memory.reflection import LLMReflector
 from .observability.tracing import init_tracing
 from .swarm import SingleAgentComposer
 from .tools import default_registry
@@ -33,7 +35,9 @@ def _prompt_approval(payload: dict[str, Any]) -> bool:
     return reply in ("y", "yes")
 
 
-def _run_task(task: str, *, auto_approve: bool, offline: bool = False) -> int:
+def _run_task(
+    task: str, *, auto_approve: bool, offline: bool = False, memory_on: bool = True
+) -> int:
     settings = get_settings()
     init_tracing(settings)
 
@@ -47,6 +51,14 @@ def _run_task(task: str, *, auto_approve: bool, offline: bool = False) -> int:
     registry = default_registry()
     composer = SingleAgentComposer(model=settings.riptide_watergraph_model)
 
+    # Stage 2: persistent memory + reflection (lessons accumulate across runs).
+    memory = JsonFileMemory(settings.memory_path) if memory_on else None
+    reflector = (
+        LLMReflector(gateway, model=settings.riptide_watergraph_model)
+        if memory_on
+        else None
+    )
+
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -57,10 +69,12 @@ def _run_task(task: str, *, auto_approve: bool, offline: bool = False) -> int:
             composer=composer,
             model=settings.riptide_watergraph_model,
             checkpointer=checkpointer,
+            memory=memory,
+            reflector=reflector,
         )
 
         print(f" thread={thread_id}")
-        result = graph.invoke({"task": task}, config)
+        result = graph.invoke({"task": task, "session_id": thread_id}, config)
 
         # Resume loop: handle one or more approval interrupts.
         while "__interrupt__" in result:
@@ -70,6 +84,12 @@ def _run_task(task: str, *, auto_approve: bool, offline: bool = False) -> int:
                 print(f" auto-approved: {payload.get('tool')}")
             result = graph.invoke(Command(resume={"approved": approved}), config)
 
+        recalled = result.get("recalled_lessons") or []
+        if recalled:
+            print(f"\n recalled {len(recalled)} lesson(s):")
+            for ln in recalled:
+                print(f"   - {ln}")
+
         print("\n FINAL ANSWER\n" + (result.get("final_answer") or "(none)"))
 
         metrics = result.get("metrics") or {}
@@ -78,6 +98,12 @@ def _run_task(task: str, *, auto_approve: bool, offline: bool = False) -> int:
         if total:
             rate = valid / total
             print(f"\n tool-call validity: {valid}/{total} = {rate:.0%}")
+
+        if memory_on:
+            stored = result.get("stored_lessons") or []
+            outcome = "success" if result.get("success") else "needs-improvement"
+            print(f" outcome: {outcome}; learned {len(stored)} lesson(s) "
+                  f"(memory now holds {len(memory)})")
     return 0
 
 
@@ -97,11 +123,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Use the deterministic offline gateway (no API key / network needed).",
     )
+    run_p.add_argument(
+        "--no-memory",
+        action="store_true",
+        help="Disable long-term memory recall + reflection for this run.",
+    )
 
     args = parser.parse_args(argv)
     if args.command == "run":
         return _run_task(
-            args.task, auto_approve=args.auto_approve, offline=args.offline
+            args.task,
+            auto_approve=args.auto_approve,
+            offline=args.offline,
+            memory_on=not args.no_memory,
         )
     parser.print_help()
     return 1

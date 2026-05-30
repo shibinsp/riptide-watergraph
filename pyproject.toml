@@ -46,6 +46,7 @@ all = ["riptide-watergraph[litellm,observability,mcp]"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=5",
     "ruff",
     "mypy",
 ]

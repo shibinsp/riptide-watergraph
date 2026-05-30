@@ -1,5 +1,7 @@
 # Riptide-Watergraph
 
+[![CI](https://github.com/shibinsp/riptide-watergraph/actions/workflows/ci.yml/badge.svg)](https://github.com/shibinsp/riptide-watergraph/actions/workflows/ci.yml)
+
 A reusable, enterprise-grade multi-agent framework — conceptually *like AutoGen*, but built as a **thin layer on [LangGraph](https://github.com/langchain-ai/langgraph)** rather than re-authoring the orchestration runtime. The design goal is to be **"like water"**: a layered, modular substrate where every layer is swappable behind a thin interface.
 
 > **Stages 1–4 implemented.** Stage 1: the runnable spine — orchestrator decomposes a task → worker calls a
@@ -66,6 +68,9 @@ riptide run "compute 21 * 2" --offline --tenant acme       # isolated memory + c
 riptide costs                                              # per-tenant dashboard
 riptide run "..." --offline --no-guardrails                # opt out for a run
 
+# Evaluation suite (behavioral regression gate; runs in CI)
+riptide eval --offline
+
 # 4. Use a real model (installs the LiteLLM gateway + tracing extras)
 pip install -e ".[all]"
 cp .env.example .env             # fill OPENAI_API_KEY / model + (optional) Langfuse keys
@@ -86,8 +91,9 @@ Riptide-Watergraph/
     ├── guardrails/              # PII redaction, injection blocking, pipeline
     ├── graph/                   # state, nodes (recall/reflect/swarm/guard), builder
     ├── observability/           # OTEL + Langfuse tracing + per-tenant CostTracker
+    ├── evaluation/              # offline task suite + scoring runner
     ├── config.py                # pydantic-settings
-    └── cli.py                   # `riptide-watergraph run`
+    └── cli.py                   # `riptide run | costs | eval`
 ```
 
 ## Self-learning loop (Stage 2)
@@ -124,6 +130,15 @@ isolated memory namespace (`--tenant`), so lessons never leak across tenants, an
 appends a `UsageRecord` to a per-tenant usage log — `riptide costs` prints the dashboard.
 See [`test_guardrails_graph.py`](tests/test_guardrails_graph.py) and
 [`test_tenancy_cost.py`](tests/test_tenancy_cost.py).
+
+## Evaluation
+
+The research consensus is to **run your own evals** rather than trust vendor benchmarks.
+`riptide eval --offline` runs a deterministic task suite through the full graph and scores
+pass rate, single-vs-swarm routing, guardrail blocking, tool-call validity, and a
+self-learning recall probe — so behavior is measurable and regressions fail CI. Swap to a
+real model with `EvalRunner(offline=False)`. See
+[`evaluation/`](src/riptide_watergraph/evaluation) and [`test_evaluation.py`](tests/test_evaluation.py).
 
 ## Roadmap
 

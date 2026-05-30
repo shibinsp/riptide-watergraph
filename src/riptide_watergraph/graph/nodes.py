@@ -49,6 +49,7 @@ class GraphContext:
     tool_k: int = 4  # Stage 3: how many tools to retrieve on demand per subtask
     guardrails: GuardrailPipeline | None = None  # Stage 4: input/output safety
     max_rounds: int = 2  # supervisor re-planning cap (rounds incl. the first)
+    max_handoffs: int = 1  # per-subtask agent-to-agent handoff cap
 
     def __post_init__(self) -> None:
         # Per-role models default to the single configured model.
@@ -92,12 +93,69 @@ def _add_usage(metrics: dict[str, Any], result: Any) -> None:
         agg[key] += int(usage.get(key, 0) or 0)
 
 
+# A built-in (non-registry) pseudo-tool the worker offers so an agent can delegate its
+# subtask to a better-suited specialist. Intercepted in the worker before tool dispatch.
+_HANDOFF_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "handoff",
+        "description": "Delegate this subtask to a better-suited specialist role "
+        "(researcher, analyst, scribe, generalist).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["role"],
+        },
+    },
+}
+
+
 def _safe_invoke(ctx: GraphContext, name: str, arguments: dict[str, Any]) -> str:
     """Invoke a tool, returning an error string instead of crashing on failure."""
     try:
         return str(_run(ctx.registry.invoke(name, arguments)))
     except Exception as exc:  # noqa: BLE001 - isolate tool failures from the graph
         return f"tool {name!r} failed: {type(exc).__name__}: {exc}"
+
+
+def _maybe_handoff(
+    state: OrchestratorState, cursor: int, result: Any, max_handoffs: int
+) -> dict[str, Any] | None:
+    """If the worker emitted a ``handoff`` call, re-assign the role and re-run once.
+
+    Returns a state update (no cursor advance => the worker re-runs this subtask under
+    the new role), or ``None`` if there's no handoff. String keys survive checkpointing.
+    """
+    if not result.tool_calls:
+        return None
+    fn = result.tool_calls[0].get("function") or {}
+    if fn.get("name") != "handoff":
+        return None
+
+    plan = state.get("plan") or []
+    subtask = plan[cursor] if cursor < len(plan) else ""
+    handoffs = dict(state.get("handoffs") or {})
+    used = int(handoffs.get(str(cursor), 0))
+    if used >= max_handoffs:
+        out: WorkerResult = {
+            "subtask": subtask,
+            "output": "handoff limit reached; handled by the current agent",
+            "tool_calls": list(result.tool_calls[:1]),
+        }
+        return {"results": [out], "cursor": cursor + 1}
+
+    try:
+        args = json.loads(fn.get("arguments", "{}"))
+    except (json.JSONDecodeError, TypeError):
+        args = {}
+    roles = list(state.get("roles") or ["generalist"] * len(plan))
+    if cursor < len(roles):
+        roles[cursor] = str(args.get("role") or "generalist")
+    handoffs[str(cursor)] = used + 1
+    return {"roles": roles, "handoffs": handoffs}
 
 
 def _parse_tool_call(
@@ -207,16 +265,23 @@ def make_worker(ctx: GraphContext):
         with span("worker", subtask=subtask, cursor=cursor, role=role.name):
             sys = Message(role="system", content=_lessons_block(state) + role.system_prompt)
             usr = Message(role="user", content=subtask)
-            # On-demand tool retrieval, scoped to the role's allowed tools.
+            # On-demand tool retrieval, scoped to the role's allowed tools. The handoff
+            # pseudo-tool is always offered so the agent can delegate to a specialist.
             allowed = set(role.tools) if role.tools is not None else None
             specs = _run(ctx.registry.retrieve(subtask, k=ctx.tool_k, allowed=allowed))
-            tools = [s.to_openai_schema() for s in specs]
+            tools = [s.to_openai_schema() for s in specs] + [_HANDOFF_SCHEMA]
             result = _run(
                 ctx.gateway.complete(
                     model=ctx.worker_model, messages=[sys, usr], tools=tools
                 )
             )
             _add_usage(metrics, result)
+
+            # Agent-to-agent handoff: re-assign the role and re-run this subtask once.
+            handoff = _maybe_handoff(state, cursor, result, ctx.max_handoffs)
+            if handoff is not None:
+                handoff["metrics"] = metrics
+                return handoff
 
             if not result.tool_calls:
                 # Direct answer — record and advance.

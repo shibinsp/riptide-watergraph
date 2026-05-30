@@ -29,6 +29,7 @@ from ..memory.types import MemoryType
 from ..observability.tracing import span
 from ..tools.registry import StaticToolRegistry, ToolValidationError
 from .state import OrchestratorState, WorkerResult
+from .waves import topological_levels
 
 
 @dataclass
@@ -39,11 +40,18 @@ class GraphContext:
     registry: StaticToolRegistry
     composer: SwarmComposer
     model: str
+    planner_model: str = ""  # model for orchestrator/finalize (defaults to model)
+    worker_model: str = ""  # model for workers (defaults to model; usually cheaper)
     memory: Memory | None = None  # Stage 2: long-term memory (recall + reflect)
     reflector: Reflector | None = None  # Stage 2: distills lessons from trajectories
     recall_k: int = 3  # how many lessons to retrieve and inject
     tool_k: int = 4  # Stage 3: how many tools to retrieve on demand per subtask
     guardrails: GuardrailPipeline | None = None  # Stage 4: input/output safety
+
+    def __post_init__(self) -> None:
+        # Per-role models default to the single configured model.
+        self.planner_model = self.planner_model or self.model
+        self.worker_model = self.worker_model or self.model
 
 
 def _lessons_block(state: OrchestratorState) -> str:
@@ -128,27 +136,37 @@ def make_orchestrator(ctx: GraphContext):
 
     def orchestrator(state: OrchestratorState) -> dict[str, Any]:
         task = state["task"]
+        metrics = _empty_metrics()
         with span("orchestrator", task=task):
             # Cost-aware composition decision (single vs swarm) for this task.
             decision = _run(ctx.composer.decide(task))
 
-            sys = Message(
-                role="system",
-                content=(
-                    _lessons_block(state)
-                    + "You are a planning orchestrator. Break the user's task into a "
-                    "short ordered list of concrete subtasks. Reply ONLY with a JSON "
-                    'array of strings, e.g. ["step one", "step two"].'
-                ),
-            )
-            usr = Message(role="user", content=task)
-            result = _run(ctx.gateway.complete(model=ctx.model, messages=[sys, usr]))
+            if decision.plan:
+                # An LLM composer already produced the plan + dependencies.
+                plan = decision.plan
+                dependencies = decision.dependencies or [[] for _ in plan]
+            else:
+                # Heuristic composer: orchestrator plans the subtasks itself.
+                sys = Message(
+                    role="system",
+                    content=(
+                        _lessons_block(state)
+                        + "You are a planning orchestrator. Break the user's task into "
+                        "a short ordered list of concrete subtasks. Reply ONLY with a "
+                        'JSON array of strings, e.g. ["step one", "step two"].'
+                    ),
+                )
+                usr = Message(role="user", content=task)
+                result = _run(
+                    ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr])
+                )
+                _add_usage(metrics, result)
+                plan = _coerce_plan(result.content, task)
+                dependencies = [[] for _ in plan]
 
-            plan = _coerce_plan(result.content, task)
-            metrics = _empty_metrics()
-            _add_usage(metrics, result)
             return {
                 "plan": plan,
+                "dependencies": dependencies,
                 "cursor": 0,
                 "metrics": metrics,
                 "swarm_decision": decision.model_dump(),
@@ -191,7 +209,7 @@ def make_worker(ctx: GraphContext):
             tools = [s.to_openai_schema() for s in specs]
             result = _run(
                 ctx.gateway.complete(
-                    model=ctx.model, messages=[sys, usr], tools=tools
+                    model=ctx.worker_model, messages=[sys, usr], tools=tools
                 )
             )
             _add_usage(metrics, result)
@@ -249,71 +267,96 @@ def make_worker(ctx: GraphContext):
 
 
 def make_swarm_worker(ctx: GraphContext):
-    """Execute all subtasks concurrently (Stage 3 swarm mode).
+    """Execute subtasks as dependency-ordered waves (Stage 3 / Phase C swarm mode).
 
-    Used when the composer chose ``swarm``: subtasks are independent and read-only, so
-    their (latency-dominant) model calls run via ``asyncio.gather``. Side-effecting
-    tools are NOT executed here — the composer routes approval-needing tasks to the
-    serial single-agent path instead.
+    Subtasks with no unmet dependencies run concurrently within a wave (``asyncio.gather``
+    over latency-dominant model calls); later waves run after the ones they depend on.
+    A shared **blackboard** carries each subtask's output to its dependents (injected into
+    their prompt), so a dependent subtask can build on upstream results. Side-effecting
+    tools are NOT executed here — the composer routes approval-needing tasks to the serial
+    single-agent path.
     """
 
     def swarm_worker(state: OrchestratorState) -> dict[str, Any]:
         plan = state.get("plan") or []
+        deps = state.get("dependencies") or [[] for _ in plan]
         metrics = state.get("metrics") or _empty_metrics()
         preamble = _lessons_block(state)
+        blackboard: dict[int, str] = {}
+        results_by_idx: dict[int, WorkerResult] = {}
 
-        async def call(subtask: str):
+        def _context_for(idx: int) -> str:
+            prereqs = [d for d in deps[idx] if d in blackboard]
+            if not prereqs:
+                return ""
+            lines = "\n".join(f"- {plan[d]}: {blackboard[d]}" for d in prereqs)
+            return f"Context from prior steps:\n{lines}\n\n"
+
+        async def call(idx: int):
             sys = Message(
                 role="system",
                 content=(
                     preamble
-                    + "You are a worker on one independent subtask. Use a tool if "
-                    "helpful; otherwise answer directly and concisely."
+                    + _context_for(idx)
+                    + "You are a worker on one subtask. Use a tool if helpful; "
+                    "otherwise answer directly and concisely."
                 ),
             )
-            usr = Message(role="user", content=subtask)
-            specs = await ctx.registry.retrieve(subtask, k=ctx.tool_k)
+            usr = Message(role="user", content=plan[idx])
+            specs = await ctx.registry.retrieve(plan[idx], k=ctx.tool_k)
             tools = [s.to_openai_schema() for s in specs]
             result = await ctx.gateway.complete(
-                model=ctx.model, messages=[sys, usr], tools=tools
+                model=ctx.worker_model, messages=[sys, usr], tools=tools
             )
-            return subtask, result
+            return idx, result
 
-        async def run_all():
-            return await asyncio.gather(*(call(s) for s in plan))
+        async def run_wave(indices: list[int]):
+            return await asyncio.gather(*(call(i) for i in indices))
 
-        with span("swarm_worker", n_subtasks=len(plan)):
-            pairs = _run(run_all())
+        levels = topological_levels(deps)
+        with span("swarm_worker", n_subtasks=len(plan), n_waves=len(levels)):
+            for wave in levels:
+                pairs = _run(run_wave(wave))
+                for idx, result in pairs:
+                    _add_usage(metrics, result)
+                    output, call_obj = _resolve_completion(ctx, plan[idx], result, metrics)
+                    results_by_idx[idx] = {
+                        "subtask": plan[idx],
+                        "output": output,
+                        "tool_calls": [call_obj] if call_obj else [],
+                    }
+                    blackboard[idx] = output  # available to dependents in later waves
 
-        results: list[WorkerResult] = []
-        for subtask, result in pairs:
-            _add_usage(metrics, result)
-            if not result.tool_calls:
-                results.append(
-                    {"subtask": subtask, "output": result.content or "", "tool_calls": []}
-                )
-                continue
-            call_obj = result.tool_calls[0]
-            _id, name, arguments, valid, reason = _parse_tool_call(ctx, call_obj)
-            metrics["tool_calls_total"] += 1
-            if valid:
-                metrics["tool_calls_valid"] += 1
-            elif reason in metrics["failures"]:
-                metrics["failures"][reason] += 1
-
-            if not valid:
-                output = f"invalid tool call ({reason}) for {name!r}"
-            elif ctx.registry.get(name).side_effecting:
-                output = f"{name!r} needs approval; rerun this subtask in single mode"
-            else:
-                output = _safe_invoke(ctx, name, arguments)
-            results.append(
-                {"subtask": subtask, "output": output, "tool_calls": [call_obj]}
-            )
-
-        return {"results": results, "cursor": len(plan), "metrics": metrics}
+        results = [results_by_idx[i] for i in range(len(plan)) if i in results_by_idx]
+        return {
+            "results": results,
+            "cursor": len(plan),
+            "metrics": metrics,
+            "blackboard": blackboard,
+        }
 
     return swarm_worker
+
+
+def _resolve_completion(
+    ctx: GraphContext, subtask: str, result: Any, metrics: dict[str, Any]
+) -> tuple[str, dict[str, Any] | None]:
+    """Turn a worker completion into (output, tool_call) for the swarm path."""
+    if not result.tool_calls:
+        return (result.content or "", None)
+    call_obj = result.tool_calls[0]
+    _id, name, arguments, valid, reason = _parse_tool_call(ctx, call_obj)
+    metrics["tool_calls_total"] += 1
+    if valid:
+        metrics["tool_calls_valid"] += 1
+    elif reason in metrics["failures"]:
+        metrics["failures"][reason] += 1
+
+    if not valid:
+        return (f"invalid tool call ({reason}) for {name!r}", call_obj)
+    if ctx.registry.get(name).side_effecting:
+        return (f"{name!r} needs approval; rerun this subtask in single mode", call_obj)
+    return (_safe_invoke(ctx, name, arguments), call_obj)
 
 
 def make_human_approval(ctx: GraphContext):
@@ -360,7 +403,9 @@ def make_finalize(ctx: GraphContext):
                 role="user",
                 content=f"Task: {state['task']}\n\nResults:\n{transcript}",
             )
-            result = _run(ctx.gateway.complete(model=ctx.model, messages=[sys, usr]))
+            result = _run(
+                ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr])
+            )
             _add_usage(metrics, result)
             answer = result.content or transcript
             return {"final_answer": answer, "metrics": metrics}

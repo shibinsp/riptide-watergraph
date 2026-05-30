@@ -35,6 +35,7 @@ class SwarmDecision(BaseModel):
     # A heuristic composer leaves these empty and the orchestrator plans separately.
     plan: list[str] = Field(default_factory=list)
     dependencies: list[list[int]] = Field(default_factory=list)
+    roles: list[str] = Field(default_factory=list)  # role name per subtask (optional)
 
 
 class SwarmComposer(ABC):

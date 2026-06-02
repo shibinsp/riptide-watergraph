@@ -85,7 +85,7 @@ def search_code(query: str, glob: str = "**/*") -> str:
             continue
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+        except OSError:  # pragma: no cover - defensive: file vanished/unreadable mid-scan
             continue
         for i, line in enumerate(text.splitlines(), start=1):
             if rx.search(line):

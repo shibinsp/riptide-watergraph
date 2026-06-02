@@ -8,13 +8,16 @@ rest of the graph (and scripted gateways) treats a specialist as a worker.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AgentRole(BaseModel):
     name: str
     system_prompt: str
     tools: list[str] | None = None  # None => all tools allowed (generalist)
+    category: str = "general"  # grouping for the Studio role gallery
+    description: str = ""  # short human-readable summary of the role
+    tags: list[str] = Field(default_factory=list)  # free-form labels for search/filter
 
 
 _GENERALIST = AgentRole(
@@ -24,6 +27,8 @@ _GENERALIST = AgentRole(
         "answer directly and concisely."
     ),
     tools=None,
+    category="general",
+    description="A capable all-rounder with access to every tool.",
 )
 
 DEFAULT_ROLES: dict[str, AgentRole] = {
@@ -35,6 +40,8 @@ DEFAULT_ROLES: dict[str, AgentRole] = {
             "facts concisely; prefer the search tool."
         ),
         tools=["web_search"],
+        category="research",
+        description="Finds and reports relevant facts.",
     ),
     "analyst": AgentRole(
         name="analyst",
@@ -43,6 +50,8 @@ DEFAULT_ROLES: dict[str, AgentRole] = {
             "precisely; prefer the calculator tool."
         ),
         tools=["calculator"],
+        category="data",
+        description="Computes and reasons about quantities.",
     ),
     "scribe": AgentRole(
         name="scribe",
@@ -51,6 +60,8 @@ DEFAULT_ROLES: dict[str, AgentRole] = {
             "use the text tools."
         ),
         tools=["word_count", "uppercase", "reverse_text", "write_note"],
+        category="writing",
+        description="Summarizes, formats, and records text.",
     ),
     "coder": AgentRole(
         name="coder",
@@ -65,6 +76,8 @@ DEFAULT_ROLES: dict[str, AgentRole] = {
             "write_file", "apply_edit",
             "run_python", "run_command", "run_tests",
         ],
+        category="engineering",
+        description="Inspects and edits code to implement features or fix bugs.",
     ),
 }
 
@@ -77,6 +90,15 @@ _ROLE_STEMS: list[tuple[str, tuple[str, ...]]] = [
     ("coder", ("code", "coding", "bug", "debug", "refactor", "implement", "fix", "patch",
                "pytest", "unit test", "function", "module", "compile", "syntax",
                "exception", "stack trace", "traceback")),
+    ("sql_developer", ("sql", "query the", "database query", "select ", "join ")),
+    ("data_analyst", ("dataset", "dataframe", "data analy", "analyze the data", "csv", "statistic")),
+    ("devops_engineer", ("devops", "deploy", "kubernetes", "docker", "ci/cd", "pipeline",
+                         "provision", "infrastructure")),
+    ("security_analyst", ("security", "vulnerab", "exploit", "pentest", "threat", "encrypt",
+                          "hash the", "cve")),
+    ("qa_engineer", ("test plan", "test case", "quality assur", "qa ", " qa")),
+    ("technical_writer", ("document", "readme", "changelog", "release note", "user guide")),
+    ("product_manager", ("roadmap", "requirement", "user story", "backlog", "prioriti")),
     ("researcher", ("search", "find", "research", "investigat", "look up", "lookup")),
     ("analyst", ("comput", "calculat", "arithmetic", "multipl", "divid", "math", "product")),
     ("scribe", ("writ", "note", "save", "summar", "format", "uppercase", "reverse",
@@ -94,4 +116,12 @@ def role_for(subtask: str) -> str:
 
 
 def get_role(name: str) -> AgentRole:
-    return DEFAULT_ROLES.get(name, _GENERALIST)
+    """Resolve a role from the full catalog (curated core + domain specialists)."""
+    from .role_library import ROLE_CATALOG  # lazy import to avoid a cycle
+    return ROLE_CATALOG.get(name, _GENERALIST)
+
+
+def all_roles() -> list[AgentRole]:
+    """Every role in the catalog (curated core + domain specialists)."""
+    from .role_library import ROLE_CATALOG  # lazy import to avoid a cycle
+    return list(ROLE_CATALOG.values())

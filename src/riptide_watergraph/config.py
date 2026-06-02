@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # Stage 4: multi-tenancy + cost attribution.
     tenant_id: str = "default"
     data_dir: str = ".riptide_watergraph"  # base dir for per-tenant memory + usage log
+
+    # Sandbox root the agentic developer tools (read_file/write_file/run_*) are confined to.
+    # All file paths are resolved under this dir; ``..``/absolute escapes are refused.
+    workspace_dir: str = ".riptide_watergraph/workspace"
     # Phase D: per-tenant spend ceiling in USD (0 = unlimited). Runs are refused once a
     # tenant's accumulated cost reaches this.
     tenant_budget_usd: float = 0.0

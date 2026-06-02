@@ -368,6 +368,24 @@ await register_mcp_tools(registry, client, prefix="fs.")   # fs.read_file, fs.wr
 # Pass `registry` to build_graph — MCP tools are now callable like any local tool.
 ```
 
+### Connect a real MCP server from the Studio
+
+The Studio's **MCP Servers** view turns the connector catalog into live tools without code. It is
+**off by default** and **allowlisted** — the browser can only attach servers the operator declares,
+and only when the feature flag is on:
+
+```bash
+export RIPTIDE_ENABLE_MCP_CONNECT=1
+export RIPTIDE_MCP_SERVERS='[{"name":"fs","command":"npx",
+  "args":["-y","@modelcontextprotocol/server-filesystem","."],"prefix":"fs."}]'
+riptide serve        # MCP Servers > Connect → fs.* tools appear everywhere; Disconnect removes them
+```
+
+Connecting registers the server's tools in a **dynamic-spec store** that `default_registry()`
+appends, so they persist across Chat, Playground, Workflows and the Tool Runner — not just one
+request. `register_dynamic_spec` / `remove_dynamic_specs` expose the same store programmatically; see
+[`examples/mcp_connect.py`](examples/mcp_connect.py) for an offline end-to-end demo via `FakeMcpClient`.
+
 See [`mcp/`](src/riptide_watergraph/mcp) and [`test_mcp.py`](tests/test_mcp.py).
 
 ## Evaluation

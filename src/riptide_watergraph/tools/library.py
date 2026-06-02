@@ -14,10 +14,12 @@ from __future__ import annotations
 import base64
 import colorsys
 import datetime as _dt
+import difflib
 import hashlib
 import hmac
 import html
 import io
+import itertools
 import json
 import math
 import os
@@ -377,6 +379,188 @@ _add("rgb_to_hex", "Convert r,g,b (0-255) to a #RRGGBB hex color.",
 _add("rgb_to_hsl", "Convert r,g,b (0-255) to HSL (JSON list).",
      lambda r, g, b: json.dumps([round(x, 3) for x in colorsys.rgb_to_hls(r / 255, g / 255, b / 255)]),
      {"r": _I, "g": _I, "b": _I}, ["r", "g", "b"], "color")
+_add("hsl_to_rgb", "Convert h,s,l (0-1) to r,g,b 0-255 (JSON list).",
+     lambda h, s, lum: json.dumps([round(x * 255) for x in colorsys.hls_to_rgb(h, lum, s)]),
+     {"h": _N, "s": _N, "lum": _N}, ["h", "s", "lum"], "color")
+_add("invert_color", "Invert a #RRGGBB hex color.",
+     lambda hex: "#%02x%02x%02x" % tuple(255 - c for c in _hex_to_rgb(hex)), {"hex": _S}, ["hex"], "color")
+_add("color_luminance", "Relative luminance (0-1) of a #RRGGBB hex color.",
+     lambda hex: round(sum(c / 255 * w for c, w in zip(_hex_to_rgb(hex), (0.2126, 0.7152, 0.0722))), 4),
+     {"hex": _S}, ["hex"], "color")
+
+# --- string-2 (category: text) ----------------------------------------------
+_add("starts_with", "Whether text starts with a prefix.",
+     lambda text, prefix: text.startswith(prefix), {"text": _S, "prefix": _S}, ["text", "prefix"], "text")
+_add("ends_with", "Whether text ends with a suffix.",
+     lambda text, suffix: text.endswith(suffix), {"text": _S, "suffix": _S}, ["text", "suffix"], "text")
+_add("index_of", "Index of the first occurrence of a substring (-1 if absent).",
+     lambda text, sub: text.find(sub), {"text": _S, "sub": _S}, ["text", "sub"], "text")
+_add("substring", "Substring of text from start to end.",
+     lambda text, start, end=-1: text[start:] if end < 0 else text[start:end],
+     {"text": _S, "start": _I, "end": _I}, ["text", "start"], "text")
+_add("center_text", "Center text within a width.",
+     lambda text, width: text.center(width), {"text": _S, "width": _I}, ["text", "width"], "text")
+_add("zfill", "Zero-pad a numeric string to a width.",
+     lambda text, width: text.zfill(width), {"text": _S, "width": _I}, ["text", "width"], "text")
+_add("count_lines_nonblank", "Count non-blank lines.",
+     lambda text: sum(1 for ln in text.splitlines() if ln.strip()), {"text": _S}, ["text"], "text")
+_add("longest_line", "Length of the longest line.",
+     lambda text: max((len(ln) for ln in text.splitlines()), default=0), {"text": _S}, ["text"], "text")
+_add("word_frequencies", "Word frequency map (JSON).",
+     lambda text: json.dumps(_freq(text.lower().split())), {"text": _S}, ["text"], "text")
+_add("most_common_word", "The most common word in text.",
+     lambda text: (max(_freq(text.lower().split()).items(), key=lambda kv: kv[1])[0]
+                   if text.split() else ""), {"text": _S}, ["text"], "text")
+_add("title_to_sentence", "Convert a Title String to a sentence (lowercase tail).",
+     lambda text: text[:1].upper() + text[1:].lower(), {"text": _S}, ["text"], "text")
+_add("squeeze_spaces", "Collapse repeated spaces into one.",
+     lambda text: re.sub(r" {2,}", " ", text), {"text": _S}, ["text"], "text")
+_add("strip_ansi", "Remove ANSI escape codes.",
+     lambda text: re.sub(r"\x1b\[[0-9;]*m", "", text), {"text": _S}, ["text"], "text")
+_add("acronym", "Acronym from the initials of each word.",
+     lambda text: "".join(w[0] for w in text.split() if w).upper(), {"text": _S}, ["text"], "text")
+_add("char_frequencies", "Character frequency map (JSON).",
+     lambda text: json.dumps(_freq(list(text))), {"text": _S}, ["text"], "text")
+_add("levenshtein", "Levenshtein edit distance between two strings.",
+     lambda a, b: _levenshtein(a, b), {"a": _S, "b": _S}, ["a", "b"], "text")
+_add("similarity_ratio", "Similarity ratio (0-1) between two strings.",
+     lambda a, b: round(_difflib_ratio(a, b), 4), {"a": _S, "b": _S}, ["a", "b"], "text")
+_add("longest_common_substring", "Longest common substring of two strings.",
+     lambda a, b: _lcs(a, b), {"a": _S, "b": _S}, ["a", "b"], "text")
+
+# --- validation / format (category: validate) -------------------------------
+_add("is_email", "Whether text is a valid-looking email address.",
+     lambda text: bool(re.fullmatch(r"[\w.+-]+@[\w-]+\.[\w.-]+", text.strip())), {"text": _S}, ["text"], "validate")
+_add("is_url", "Whether text is an http(s) URL.",
+     lambda text: bool(re.fullmatch(r"https?://[^\s]+", text.strip())), {"text": _S}, ["text"], "validate")
+_add("is_ipv4", "Whether text is a valid IPv4 address.",
+     lambda text: all(p.isdigit() and 0 <= int(p) <= 255 for p in text.split(".")) and text.count(".") == 3,
+     {"text": _S}, ["text"], "validate")
+_add("is_uuid", "Whether text is a UUID.",
+     lambda text: bool(re.fullmatch(r"[0-9a-fA-F-]{36}", text.strip())), {"text": _S}, ["text"], "validate")
+_add("is_numeric", "Whether text is a number.",
+     lambda text: bool(re.fullmatch(r"-?\d+(\.\d+)?", text.strip())), {"text": _S}, ["text"], "validate")
+_add("is_json", "Whether text is valid JSON.",
+     lambda text: _try_json(text), {"text": _S}, ["text"], "validate")
+_add("is_hex_color", "Whether text is a #RRGGBB hex color.",
+     lambda text: bool(re.fullmatch(r"#[0-9a-fA-F]{6}", text.strip())), {"text": _S}, ["text"], "validate")
+_add("is_palindrome", "Whether text is a palindrome (ignoring case/space).",
+     lambda text: (lambda s: s == s[::-1])(re.sub(r"[^a-z0-9]", "", text.lower())), {"text": _S}, ["text"], "validate")
+_add("luhn_check", "Validate a number string with the Luhn checksum.",
+     lambda text: _luhn(text), {"text": _S}, ["text"], "validate")
+_add("password_strength", "Score a password 0-5 by length/variety.",
+     lambda text: _pw_strength(text), {"text": _S}, ["text"], "validate")
+
+# --- math-2 / stats-2 (category: math) --------------------------------------
+_add("abs_value", "Absolute value.", lambda x: abs(x), {"x": _N}, ["x"], "math")
+_add("sign", "Sign of a number (-1/0/1).", lambda x: (x > 0) - (x < 0), {"x": _N}, ["x"], "math")
+_add("ceil", "Ceiling of a number.", lambda x: math.ceil(x), {"x": _N}, ["x"], "math")
+_add("floor", "Floor of a number.", lambda x: math.floor(x), {"x": _N}, ["x"], "math")
+_add("modulo", "a modulo b.", lambda a, b: a % b, {"a": _N, "b": _N}, ["a", "b"], "math")
+_add("average", "Average of numbers.", lambda numbers: statistics.fmean(numbers), _NUMS, ["numbers"], "math", "stats")
+_add("geometric_mean", "Geometric mean of positive numbers.",
+     lambda numbers: statistics.geometric_mean(numbers), _NUMS, ["numbers"], "math", "stats")
+_add("harmonic_mean", "Harmonic mean of numbers.",
+     lambda numbers: statistics.harmonic_mean(numbers), _NUMS, ["numbers"], "math", "stats")
+_add("quantile", "The q-quantile (0-1) of numbers.",
+     lambda numbers, q: _quantile(numbers, q), {"numbers": {"type": "array", "items": _N}, "q": _N},
+     ["numbers", "q"], "math", "stats")
+_add("zscore", "Z-score of x within numbers.",
+     lambda x, numbers: _zscore(x, numbers), {"x": _N, "numbers": {"type": "array", "items": _N}},
+     ["x", "numbers"], "math", "stats")
+_add("dot_product", "Dot product of two equal-length vectors.",
+     lambda a, b: sum(x * y for x, y in zip(a, b)),
+     {"a": {"type": "array", "items": _N}, "b": {"type": "array", "items": _N}}, ["a", "b"], "math")
+_add("normalize_vector", "Scale a vector to unit length (JSON list).",
+     lambda numbers: json.dumps(_normalize_vec(numbers)), _NUMS, ["numbers"], "math")
+_add("cumulative_sum", "Running cumulative sum (JSON list).",
+     lambda numbers: json.dumps(list(itertools.accumulate(numbers))), _NUMS, ["numbers"], "math")
+_add("compound_interest", "Future value with compound interest.",
+     lambda principal, rate, years, n=1: round(principal * (1 + rate / n) ** (n * years), 2),
+     {"principal": _N, "rate": _N, "years": _N, "n": _I}, ["principal", "rate", "years"], "math", "finance")
+_add("simple_interest", "Simple interest amount.",
+     lambda principal, rate, years: round(principal * rate * years, 2),
+     {"principal": _N, "rate": _N, "years": _N}, ["principal", "rate", "years"], "math", "finance")
+_add("percentage_change", "Percent change from old to new.",
+     lambda old, new: round((new - old) / old * 100, 4) if old else 0,
+     {"old": _N, "new": _N}, ["old", "new"], "math", "finance")
+_add("annuity_payment", "Level payment for a loan (amortized).",
+     lambda principal, rate, periods: _annuity(principal, rate, periods),
+     {"principal": _N, "rate": _N, "periods": _I}, ["principal", "rate", "periods"], "math", "finance")
+
+# --- collections-2 (category: collections) ----------------------------------
+_add("first_n", "First n items of a JSON array.",
+     lambda items, n: json.dumps(items[:n]), {"items": {"type": "array"}, "n": _I}, ["items", "n"], "collections")
+_add("last_n", "Last n items of a JSON array.",
+     lambda items, n: json.dumps(items[-n:] if n else []), {"items": {"type": "array"}, "n": _I}, ["items", "n"], "collections")
+_add("zip_lists", "Zip two JSON arrays into pairs.",
+     lambda a, b: json.dumps([list(p) for p in zip(a, b)]),
+     {"a": {"type": "array"}, "b": {"type": "array"}}, ["a", "b"], "collections")
+_add("intersection", "Items present in both JSON arrays.",
+     lambda a, b: json.dumps([x for x in a if x in b]),
+     {"a": {"type": "array"}, "b": {"type": "array"}}, ["a", "b"], "collections")
+_add("difference", "Items in a but not in b.",
+     lambda a, b: json.dumps([x for x in a if x not in b]),
+     {"a": {"type": "array"}, "b": {"type": "array"}}, ["a", "b"], "collections")
+_add("union_lists", "Unique union of two JSON arrays.",
+     lambda a, b: json.dumps(_unique(list(a) + list(b))),
+     {"a": {"type": "array"}, "b": {"type": "array"}}, ["a", "b"], "collections")
+_add("partition", "Split items into n roughly-equal groups (JSON).",
+     lambda items, n: json.dumps([items[i::max(1, n)] for i in range(max(1, n))]),
+     {"items": {"type": "array"}, "n": _I}, ["items", "n"], "collections")
+_add("dict_keys", "Keys of a JSON object (JSON list).",
+     lambda obj: json.dumps(list(json.loads(obj).keys())), {"obj": _S}, ["obj"], "collections")
+_add("dict_values", "Values of a JSON object (JSON list).",
+     lambda obj: json.dumps(list(json.loads(obj).values())), {"obj": _S}, ["obj"], "collections")
+_add("invert_dict", "Swap keys and values of a JSON object.",
+     lambda obj: json.dumps({str(v): k for k, v in json.loads(obj).items()}), {"obj": _S}, ["obj"], "collections")
+_add("group_by_length", "Group words by their length (JSON).",
+     lambda text: json.dumps(_group_by_len(text.split())), {"text": _S}, ["text"], "collections")
+
+# --- datetime-2 (category: datetime) ----------------------------------------
+_add("day_of_year", "Day-of-year for an ISO date.",
+     lambda date: _dt.date.fromisoformat(date).timetuple().tm_yday, {"date": _S}, ["date"], "datetime")
+_add("quarter", "Calendar quarter (1-4) of an ISO date.",
+     lambda date: (_dt.date.fromisoformat(date).month - 1) // 3 + 1, {"date": _S}, ["date"], "datetime")
+_add("is_weekend", "Whether an ISO date is a weekend.",
+     lambda date: _dt.date.fromisoformat(date).weekday() >= 5, {"date": _S}, ["date"], "datetime")
+_add("add_months", "Add months to an ISO date (clamped).",
+     lambda date, months: _add_months(date, months), {"date": _S, "months": _I}, ["date", "months"], "datetime")
+_add("end_of_month", "Last date of the month for an ISO date.",
+     lambda date: _end_of_month(date), {"date": _S}, ["date"], "datetime")
+_add("age_years", "Whole years between an ISO birthdate and another ISO date.",
+     lambda birth, on: _age(birth, on), {"birth": _S, "on": _S}, ["birth", "on"], "datetime")
+_add("seconds_to_hms", "Format seconds as H:MM:SS.",
+     lambda seconds: str(_dt.timedelta(seconds=int(seconds))), {"seconds": _N}, ["seconds"], "datetime")
+_add("humanize_seconds", "Human-readable duration for a second count.",
+     lambda seconds: _humanize_secs(seconds), {"seconds": _N}, ["seconds"], "datetime")
+
+# --- geo (category: units) --------------------------------------------------
+_add("haversine_km", "Great-circle distance (km) between two lat/lon points.",
+     lambda lat1, lon1, lat2, lon2: round(_haversine(lat1, lon1, lat2, lon2), 3),
+     {"lat1": _N, "lon1": _N, "lat2": _N, "lon2": _N}, ["lat1", "lon1", "lat2", "lon2"], "units", "geo")
+_add("miles_to_nm", "Miles to nautical miles.", lambda mi: round(mi * 0.868976, 4), {"mi": _N}, ["mi"], "units")
+_add("acres_to_hectares", "Acres to hectares.", lambda acres: round(acres * 0.404686, 4), {"acres": _N}, ["acres"], "units")
+_add("liters_to_gallons", "Liters to US gallons.", lambda liters: round(liters * 0.264172, 4), {"liters": _N}, ["liters"], "units")
+_add("gallons_to_liters", "US gallons to liters.", lambda gallons: round(gallons / 0.264172, 4), {"gallons": _N}, ["gallons"], "units")
+_add("mph_to_kmh", "Miles/hour to km/hour.", lambda mph: round(mph * 1.60934, 4), {"mph": _N}, ["mph"], "units")
+_add("kmh_to_ms", "km/hour to m/second.", lambda kmh: round(kmh / 3.6, 4), {"kmh": _N}, ["kmh"], "units")
+_add("bmi", "Body-mass index from kg and meters.",
+     lambda kg, m: round(kg / (m * m), 2) if m else 0, {"kg": _N, "m": _N}, ["kg", "m"], "units")
+
+# --- encoding-2 (category: encoding) ----------------------------------------
+_add("caesar_cipher", "Shift letters by n (Caesar cipher).",
+     lambda text, shift: _caesar(text, shift), {"text": _S, "shift": _I}, ["text", "shift"], "encoding")
+_add("morse_encode", "Encode A-Z/0-9 text to Morse code.",
+     lambda text: _morse(text), {"text": _S}, ["text"], "encoding")
+_add("binary_encode", "Encode text to space-separated 8-bit binary.",
+     lambda text: " ".join(format(b, "08b") for b in text.encode()), {"text": _S}, ["text"], "encoding")
+_add("binary_decode", "Decode space-separated binary to text.",
+     lambda text: "".join(chr(int(b, 2)) for b in text.split()), {"text": _S}, ["text"], "encoding")
+_add("to_ordinal", "Ordinal string for an integer (1st, 2nd, …).",
+     lambda n: _ordinal(n), {"n": _I}, ["n"], "encoding")
+_add("number_to_words", "Spell a non-negative integer (0-999) in words.",
+     lambda n: _num_to_words(n), {"n": _I}, ["n"], "encoding")
 
 
 # --- gated network pack ------------------------------------------------------
@@ -565,3 +749,177 @@ def _line_diff(a: str, b: str) -> str:
 def _hex_to_rgb(hex_color: str) -> list[int]:
     h = hex_color.lstrip("#")
     return [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+
+
+def _levenshtein(a: str, b: str) -> int:
+    if not a:
+        return len(b)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _difflib_ratio(a: str, b: str) -> float:
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _lcs(a: str, b: str) -> str:
+    m = difflib.SequenceMatcher(None, a, b).find_longest_match(0, len(a), 0, len(b))
+    return a[m.a:m.a + m.size]
+
+
+def _luhn(text: str) -> bool:
+    digits = [int(c) for c in text if c.isdigit()]
+    if not digits:
+        return False
+    total = 0
+    for i, d in enumerate(reversed(digits)):
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
+
+
+def _pw_strength(text: str) -> int:
+    score = 0
+    if len(text) >= 8:
+        score += 1
+    if len(text) >= 12:
+        score += 1
+    if re.search(r"[a-z]", text) and re.search(r"[A-Z]", text):
+        score += 1
+    if re.search(r"\d", text):
+        score += 1
+    if re.search(r"[^\w\s]", text):
+        score += 1
+    return score
+
+
+def _quantile(numbers: list[float], q: float) -> float:
+    s = sorted(numbers)
+    if not s:
+        return 0.0
+    pos = max(0.0, min(1.0, q)) * (len(s) - 1)
+    lo = int(pos)
+    frac = pos - lo
+    return s[lo] if lo + 1 >= len(s) else s[lo] + (s[lo + 1] - s[lo]) * frac
+
+
+def _zscore(x: float, numbers: list[float]) -> float:
+    if len(numbers) < 2:
+        return 0.0
+    mean = statistics.fmean(numbers)
+    sd = statistics.pstdev(numbers)
+    return round((x - mean) / sd, 4) if sd else 0.0
+
+
+def _normalize_vec(numbers: list[float]) -> list[float]:
+    norm = math.sqrt(sum(x * x for x in numbers))
+    return [round(x / norm, 6) for x in numbers] if norm else list(numbers)
+
+
+def _annuity(principal: float, rate: float, periods: int) -> float:
+    if rate == 0:
+        return round(principal / periods, 2) if periods else 0.0
+    return round(principal * rate / (1 - (1 + rate) ** -periods), 2)
+
+
+def _group_by_len(words: list[str]) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for w in words:
+        out.setdefault(str(len(w)), []).append(w)
+    return out
+
+
+def _add_months(date: str, months: int) -> str:
+    d = _dt.date.fromisoformat(date)
+    total = d.month - 1 + months
+    year = d.year + total // 12
+    month = total % 12 + 1
+    import calendar
+    day = min(d.day, calendar.monthrange(year, month)[1])
+    return _dt.date(year, month, day).isoformat()
+
+
+def _end_of_month(date: str) -> str:
+    import calendar
+    d = _dt.date.fromisoformat(date)
+    return _dt.date(d.year, d.month, calendar.monthrange(d.year, d.month)[1]).isoformat()
+
+
+def _age(birth: str, on: str) -> int:
+    b = _dt.date.fromisoformat(birth)
+    o = _dt.date.fromisoformat(on)
+    return o.year - b.year - ((o.month, o.day) < (b.month, b.day))
+
+
+def _humanize_secs(seconds: float) -> str:
+    s = int(seconds)
+    parts: list[str] = []
+    for label, size in (("d", 86400), ("h", 3600), ("m", 60), ("s", 1)):
+        if s >= size or (label == "s" and not parts):
+            parts.append(f"{s // size}{label}")
+            s %= size
+    return " ".join(parts)
+
+
+def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return r * 2 * math.asin(math.sqrt(a))
+
+
+def _caesar(text: str, shift: int) -> str:
+    out = []
+    for ch in text:
+        if ch.isalpha():
+            base = ord("A") if ch.isupper() else ord("a")
+            out.append(chr((ord(ch) - base + shift) % 26 + base))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+_MORSE = {
+    "A": ".-", "B": "-...", "C": "-.-.", "D": "-..", "E": ".", "F": "..-.", "G": "--.",
+    "H": "....", "I": "..", "J": ".---", "K": "-.-", "L": ".-..", "M": "--", "N": "-.",
+    "O": "---", "P": ".--.", "Q": "--.-", "R": ".-.", "S": "...", "T": "-", "U": "..-",
+    "V": "...-", "W": ".--", "X": "-..-", "Y": "-.--", "Z": "--..", "0": "-----",
+    "1": ".----", "2": "..---", "3": "...--", "4": "....-", "5": ".....", "6": "-....",
+    "7": "--...", "8": "---..", "9": "----.",
+}
+
+
+def _morse(text: str) -> str:
+    return " ".join(_MORSE.get(c, c) for c in text.upper() if not c.isspace())
+
+
+def _ordinal(n: int) -> str:
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+_ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+         "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+         "seventeen", "eighteen", "nineteen"]
+_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+
+
+def _num_to_words(n: int) -> str:
+    if n < 0 or n > 999:
+        return "out of range (0-999)"
+    if n < 20:
+        return _ONES[n]
+    if n < 100:
+        return _TENS[n // 10] + ("-" + _ONES[n % 10] if n % 10 else "")
+    rest = n % 100
+    return _ONES[n // 100] + " hundred" + (" " + _num_to_words(rest) if rest else "")

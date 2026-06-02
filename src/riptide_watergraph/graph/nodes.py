@@ -117,6 +117,24 @@ _HANDOFF_SCHEMA: dict[str, Any] = {
 }
 
 
+# A built-in pseudo-tool the worker offers so an agent can pause and ask the human a
+# clarifying question (HITL). Intercepted in the worker before tool dispatch; the answer
+# is injected into the subtask's prompt on re-run (capped at one question per subtask).
+_ASK_HUMAN_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "ask_human",
+        "description": "Ask the human operator a clarifying question when the subtask is "
+        "ambiguous. Use sparingly — only when you cannot proceed without the answer.",
+        "parameters": {
+            "type": "object",
+            "properties": {"question": {"type": "string"}},
+            "required": ["question"],
+        },
+    },
+}
+
+
 def _safe_invoke(ctx: GraphContext, name: str, arguments: dict[str, Any]) -> str:
     """Invoke a tool, returning an error string instead of crashing on failure."""
     try:
@@ -302,6 +320,9 @@ def make_worker(ctx: GraphContext):
             allowed = set(role.tools) if role.tools is not None else None
             specs = _run(ctx.registry.retrieve(subtask, k=ctx.tool_k, allowed=allowed))
             tools = [s.to_openai_schema() for s in specs] + [_HANDOFF_SCHEMA]
+            # Offer the clarify pseudo-tool only until this subtask has been answered once.
+            if str(cursor) not in (state.get("clarifications") or {}):
+                tools.append(_ASK_HUMAN_SCHEMA)
             # ReAct loop: think -> act -> observe, up to max_steps (1 == single-shot).
             messages = [
                 Message(role="system", content=_lessons_block(state) + role.system_prompt),
@@ -529,6 +550,38 @@ def make_human_approval(ctx: GraphContext):
         return {"approval": approval}
 
     return human_approval
+
+
+def make_human_clarify(ctx: GraphContext):
+    """Pause to ask the human a clarifying question, then re-run the subtask with the answer.
+
+    Mirrors ``human_approval`` but for the ``ask_human`` pseudo-tool: ``interrupt()`` surfaces
+    the question, the resume payload supplies the answer, which is stored in
+    ``state['clarifications']`` and injected into the subtask's prompt on re-run. The cap
+    (one answer per subtask) is enforced by the worker, which stops offering ``ask_human``
+    once an answer exists.
+    """
+
+    def human_clarify(state: OrchestratorState) -> dict[str, Any]:
+        pending = state.get("pending_action") or {}
+        cursor = pending.get("cursor", state.get("cursor", 0))
+        reply = interrupt(
+            {
+                "type": "clarification",
+                "question": pending.get("question"),
+                "subtask": pending.get("subtask"),
+            }
+        )
+        # Normalize the resume payload into an answer string.
+        if isinstance(reply, dict):
+            answer = str(reply.get("answer", ""))
+        else:
+            answer = str(reply)
+        clarifications = dict(state.get("clarifications") or {})
+        clarifications[str(cursor)] = answer
+        return {"clarifications": clarifications, "pending_action": None}
+
+    return human_clarify
 
 
 def make_finalize(ctx: GraphContext):
@@ -889,8 +942,11 @@ def route_after_orchestrator(state: OrchestratorState) -> str:
 
 
 def route_after_worker(state: OrchestratorState) -> str:
-    """worker -> human_approval (needs approval) | worker (more) | finalize."""
-    if state.get("pending_action") is not None and state.get("approval") is None:
+    """worker -> human_clarify | human_approval | worker (more) | finalize."""
+    pending = state.get("pending_action")
+    if pending is not None and state.get("approval") is None:
+        if pending.get("type") == "clarification":
+            return "human_clarify"
         return "human_approval"
     plan = state.get("plan") or []
     if state.get("cursor", 0) < len(plan):

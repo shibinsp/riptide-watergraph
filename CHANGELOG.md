@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-02
+
+### Added
+- **Like Water Studio** — a dependency-free web UI (vanilla-JS SPA, no build step) served by
+  `riptide serve` at `/`: Playground with a full run inspector, Sessions, Tools, Roles, Eval,
+  and Costs views.
+- Read-only studio API: `GET /api/meta`, `/api/tools`, `/api/roles`, `/api/costs`, and
+  `POST /api/eval`.
+- `RunResult` now carries run detail (`plan`, `roles`, `results`, `verdicts`,
+  `swarm_decision`, `metrics`, `guard_violations`, `guard_violations_out`, `clarifications`)
+  for inspection; `RunRequest` exposes `guardrails`, `critic`, `supervisor`, `react_steps`,
+  `vote_k`, and `final_schema`.
+
+### Fixed
+- `service.run_task` now forwards `critic`/`supervisor`/`react_steps`/`vote_k` to
+  `build_graph` (previously only the CLI could use these — the HTTP API silently ignored them).
+
 ## [0.2.0] - 2026-05-30
 
 ### Added

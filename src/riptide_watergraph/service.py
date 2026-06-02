@@ -62,6 +62,7 @@ class RunResult(BaseModel):
     stored_lessons: list[str] = Field(default_factory=list)
     tool_calls_total: int = 0
     tool_calls_valid: int = 0
+    structured: dict[str, Any] | None = None
 
 
 def build_components(
@@ -142,6 +143,7 @@ def run_task(
     llm_composer: bool = False,
     history: list[str] | None = None,
     auto_approve: bool = True,
+    final_schema: dict[str, Any] | None = None,
     settings: Settings | None = None,
 ) -> RunResult:
     """Run a task end-to-end and return a structured result (no console I/O)."""
@@ -176,6 +178,7 @@ def run_task(
             guardrails=comp.guardrails,
             planner_model=comp.planner_model,
             worker_model=comp.worker_model,
+            final_schema=final_schema,
         )
         state = graph.invoke(
             {"task": _with_history(task, history), "session_id": thread_id,
@@ -199,6 +202,7 @@ def run_task(
         stored_lessons=state.get("stored_lessons") or [],
         tool_calls_total=metrics.get("tool_calls_total", 0),
         tool_calls_valid=metrics.get("tool_calls_valid", 0),
+        structured=state.get("structured_output") or None,
     )
 
 

@@ -50,6 +50,11 @@ class DemoGateway(ModelGateway):
             return CompletionResult(content=json.dumps(self._plan(user)))
 
         if "You are a worker" in system:
+            # ReAct: once a tool result has been observed, synthesize a final answer
+            # (so the think->act->observe loop terminates instead of re-calling tools).
+            observation = next((m.content for m in messages if m.role == "tool"), None)
+            if observation is not None:
+                return CompletionResult(content=f"(offline) done; tool result: {observation}")
             return self._worker(user, tools)
 
         # finalize

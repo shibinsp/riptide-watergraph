@@ -12,6 +12,7 @@ const ICONS = {
   roles: "M16 11a4 4 0 10-8 0 4 4 0 008 0zM4 21a8 8 0 0116 0",
   eval: "M9 11l3 3 8-8M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11",
   costs: "M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6",
+  monitoring: "M3 3v18h18M7 14l3-4 3 3 5-6",
   connections: "M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20M12 2a15 15 0 010 20 15 15 0 010-20z",
   tool_runner: "M5 3l14 9-14 9V3zM19 3v18",
   workflows: "M4 5a2 2 0 100 4 2 2 0 000-4zM18 15a2 2 0 100 4 2 2 0 000-4zM18 5a2 2 0 100 4 2 2 0 000-4zM6 7h8a2 2 0 012 2v0M6 7v6a2 2 0 002 2h8",
@@ -145,7 +146,7 @@ function saveHistory(entry) {
 const NAV = [
   { group: "Workspace", items: [["chat", "Chat"], ["playground", "Playground"], ["workflows", "Workflows"], ["history", "History"]] },
   { group: "Library", items: [["tools", "Tools"], ["roles", "Roles"], ["tool_runner", "Tool Runner"]] },
-  { group: "Insights", items: [["eval", "Eval"], ["costs", "Costs"]] },
+  { group: "Insights", items: [["monitoring", "Monitoring"], ["eval", "Eval"], ["costs", "Costs"]] },
   { group: "System", items: [["connections", "Connections"]] },
 ];
 const VIEWS = {};
@@ -801,6 +802,75 @@ VIEWS.costs = async function () {
   view().appendChild(el("div", { class: "card" }, el("div", { class: "card-pad" },
     el("table", null, el("tr", null, el("th", null, "Tenant"), el("th", null, "Runs"),
       el("th", null, "Tokens"), el("th", null, "Cost"), el("th", null, "Blocked")), ...rows))));
+};
+
+// =================== Monitoring ===================
+function kpi(label, value, sub) {
+  return el("div", { class: "kpi" },
+    el("div", { class: "kpi-value" }, String(value)),
+    el("div", { class: "kpi-label" }, label),
+    sub ? el("div", { class: "kpi-sub muted" }, sub) : null);
+}
+function barChart(series, valueKey, label) {
+  // series: [{date/key, <valueKey>}]; renders simple inline-SVG bars (no deps).
+  const W = 100, H = 40, n = series.length || 1;
+  const max = Math.max(1, ...series.map((s) => s[valueKey] || 0));
+  const bw = W / n;
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("class", "mini-chart");
+  svg.setAttribute("preserveAspectRatio", "none");
+  series.forEach((s, i) => {
+    const h = ((s[valueKey] || 0) / max) * (H - 2);
+    const rect = document.createElementNS(ns, "rect");
+    rect.setAttribute("x", String(i * bw + bw * 0.12));
+    rect.setAttribute("y", String(H - h));
+    rect.setAttribute("width", String(bw * 0.76));
+    rect.setAttribute("height", String(h));
+    rect.setAttribute("rx", "0.6");
+    const title = document.createElementNS(ns, "title");
+    title.textContent = (s.date || s.key || "") + ": " + (s[valueKey] || 0);
+    rect.appendChild(title);
+    svg.appendChild(rect);
+  });
+  return el("div", null, el("div", { class: "lbl" }, label), svg);
+}
+
+VIEWS.monitoring = async function () {
+  view().append(viewHead("Monitoring", "Run metrics aggregated from the usage log."));
+  const m = await api("/api/monitoring");
+  if (!m.totals.runs) { view().appendChild(el("div", { class: "empty" }, "No runs recorded yet. Run a task in Chat or Playground.")); return; }
+  const t = m.totals;
+  const pct = (x) => x == null ? "—" : Math.round(x * 100) + "%";
+  view().append(el("div", { class: "kpi-grid" },
+    kpi("Runs", t.runs),
+    kpi("Success rate", pct(t.success_rate)),
+    kpi("Avg latency", t.avg_latency_ms + " ms"),
+    kpi("Tokens", t.total_tokens),
+    kpi("Cost", "$" + (t.total_cost_usd || 0).toFixed(4)),
+    kpi("Tool valid", pct(t.tool_valid_rate)),
+    kpi("Blocked", t.blocked)));
+
+  const modeSeries = Object.keys(m.by_mode).map((k) => ({ key: k, count: m.by_mode[k] }));
+  view().append(el("div", { class: "grid" },
+    panel(barChart(m.daily, "runs", "Runs per day")),
+    panel(barChart(m.daily, "cost_usd", "Cost per day ($)")),
+    panel(barChart(modeSeries, "count", "Runs by mode"))));
+
+  const rows = m.recent.map((r) => el("tr", null,
+    el("td", { class: "muted" }, r.ts ? new Date(r.ts * 1000).toLocaleString() : "—"),
+    el("td", null, r.task),
+    el("td", null, el("span", { class: "chip" }, r.mode)),
+    el("td", null, r.latency_ms + " ms"),
+    el("td", null, String(r.tokens)),
+    el("td", null, "$" + (r.cost_usd || 0).toFixed(4)),
+    el("td", null, r.blocked ? el("span", { class: "badge bad" }, "blocked")
+      : el("span", { class: r.success === false ? "badge warn" : "badge ok" },
+          r.success === false ? "needs work" : "ok"))));
+  view().append(panel(el("div", null, el("h2", { style: "margin-top:0" }, "Recent runs"),
+    el("table", null, el("tr", null, el("th", null, "When"), el("th", null, "Task"),
+      el("th", null, "Mode"), el("th", null, "Latency"), el("th", null, "Tokens"),
+      el("th", null, "Cost"), el("th", null, "Status")), ...rows))));
 };
 
 // =================== Workflows (drag-and-drop canvas) ===================

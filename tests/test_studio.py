@@ -34,23 +34,26 @@ def test_static_assets_served(client):
 
 def test_api_meta(client):
     m = client.get("/api/meta").json()
-    assert m["tool_count"] == 6
-    assert len(m["role_names"]) == 4
+    assert m["tool_count"] == 12  # 6 examples + 6 agentic dev tools (exec off)
+    assert len(m["role_names"]) == 5
     assert m["models"]  # non-empty
     assert "react_steps" in m["defaults"]
+    assert m["connection"]["provider"] == "offline"
 
 
-def test_api_tools_returns_six(client):
+def test_api_tools_returns_twelve(client):
     tools = client.get("/api/tools").json()
-    assert len(tools) == 6
+    assert len(tools) == 12
+    names = {t["name"] for t in tools}
+    assert {"read_file", "write_file", "apply_edit", "search_code"} <= names
     for t in tools:
         assert set(t) == {"name", "version", "description", "side_effecting", "json_schema"}
         assert "handler" not in t
 
 
-def test_api_roles_returns_four(client):
+def test_api_roles_includes_coder(client):
     roles = client.get("/api/roles").json()
-    assert {r["name"] for r in roles} == {"generalist", "researcher", "analyst", "scribe"}
+    assert {r["name"] for r in roles} == {"generalist", "researcher", "analyst", "scribe", "coder"}
 
 
 def test_api_eval_offline_pass_rate(client):
@@ -88,3 +91,41 @@ def test_run_populates_plan_and_results(client):
     assert data["plan"]
     assert data["results"]
     assert data["mode"] == "swarm"
+
+
+def test_connection_default_is_offline(client):
+    c = client.get("/api/connection").json()
+    assert c["provider"] == "offline"
+    assert c["configured"] is False
+    assert c["key_masked"] is None
+
+
+def test_connection_set_masks_key_and_applies_env(client):
+    import os
+
+    try:
+        c = client.post(
+            "/api/connection",
+            json={"provider": "openai", "model": "gpt-4o", "api_key": "sk-test-ABCD1234"},
+        ).json()
+        assert c["configured"] is True
+        assert c["key_masked"].endswith("1234")
+        # GET must never echo the raw secret.
+        assert "sk-test-ABCD1234" not in client.get("/api/connection").text
+        # The key + model are mirrored to the environment for the next run.
+        assert os.environ.get("OPENAI_API_KEY") == "sk-test-ABCD1234"
+        assert os.environ.get("RIPTIDE_WATERGRAPH_MODEL") == "gpt-4o"
+    finally:
+        # Reset so global state / env don't leak into other tests or the live server.
+        client.post("/api/connection", json={"provider": "offline", "model": ""})
+
+
+def test_connection_custom_requires_base_url(client):
+    r = client.post("/api/connection", json={"provider": "custom", "model": "x", "api_key": "k"})
+    assert r.status_code == 400
+    client.post("/api/connection", json={"provider": "offline", "model": ""})
+
+
+def test_connection_test_offline_ok(client):
+    r = client.post("/api/connection/test", json={"provider": "offline"}).json()
+    assert r["ok"] is True

@@ -17,6 +17,8 @@ Endpoints:
 - ``GET  /api/connection``           — current AI connection (provider/model, masked key).
 - ``POST /api/connection``           — set the AI provider/model/key at runtime (in-memory).
 - ``POST /api/connection/test``      — ping the configured gateway to validate the connection.
+- ``GET/POST/DELETE /api/workflows`` — CRUD for saved visual workflow specs.
+- ``POST /api/workflows/run`` + ``GET /api/workflows/run/stream`` — run a workflow DAG (SSE).
 
 Endpoints are sync ``def`` on purpose: the graph runs synchronously (each node drives
 async work via ``asyncio.run``), so FastAPI executes them in its threadpool where a fresh
@@ -36,21 +38,30 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from ..config import get_settings
 from ..evaluation import EvalReport, EvalRunner
 from ..gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from ..interfaces.gateway import Message
 from ..observability.cost import BudgetExceeded, CostTracker, TenantTotals, _PRICE_PER_1K
-from ..service import RunResult, SessionStore, run_task, stream_task
+from ..service import (
+    RunResult,
+    SessionStore,
+    run_task,
+    run_workflow,
+    stream_task,
+    stream_workflow,
+)
 from ..swarm.roles import AgentRole, all_roles
 from ..tools import default_registry
 from ..tools.registry import ToolValidationError
+from ..workflows import WorkflowSpec, WorkflowStore, WorkflowValidationError, validate_spec
 
-_VERSION = "0.6.0"
+_VERSION = "0.7.0"
 _STATIC = Path(__file__).parent / "static"
 _sessions = SessionStore()
+_workflows = WorkflowStore()
 
 
 def _sampling(temperature: float | None, top_p: float | None,
@@ -111,6 +122,16 @@ class MessageRequest(BaseModel):
 
 class EvalRequest(BaseModel):
     offline: bool = True
+
+
+class WorkflowRunRequest(BaseModel):
+    spec: WorkflowSpec
+    tenant_id: str = "default"
+    offline: bool = False
+    memory: bool = True
+    guardrails: bool = True
+    critic: bool = False
+    supervisor: bool = False
 
 
 class ToolInfo(BaseModel):
@@ -426,6 +447,75 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001 - report any failure, never crash
             return ConnectionTestResult(ok=False, model=model, latency_ms=0,
                                         detail=f"{type(exc).__name__}: {exc}")
+
+    # --- Workflow builder (canvas DAG -> StaticPlanComposer -> swarm run) ---
+
+    def _wf_messages(exc: Exception) -> list[str]:
+        return exc.messages if isinstance(exc, WorkflowValidationError) else [str(exc)]
+
+    @app.get("/api/workflows", response_model=list[str])
+    def api_list_workflows() -> list[str]:
+        return _workflows.list()
+
+    @app.post("/api/workflows", response_model=WorkflowSpec)
+    def api_save_workflow(spec: WorkflowSpec) -> WorkflowSpec:
+        try:
+            validate_spec(spec)
+        except WorkflowValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.messages) from exc
+        _workflows.save(spec)
+        return spec
+
+    @app.get("/api/workflows/{name}", response_model=WorkflowSpec)
+    def api_get_workflow(name: str) -> WorkflowSpec:
+        spec = _workflows.get(name)
+        if spec is None:
+            raise HTTPException(status_code=404, detail=f"no workflow: {name}")
+        return spec
+
+    @app.delete("/api/workflows/{name}")
+    def api_delete_workflow(name: str) -> dict:
+        if not _workflows.delete(name):
+            raise HTTPException(status_code=404, detail=f"no workflow: {name}")
+        return {"status": "deleted", "name": name}
+
+    @app.post("/api/workflows/run", response_model=RunResult)
+    def api_run_workflow(req: WorkflowRunRequest) -> RunResult:
+        try:
+            return run_workflow(
+                req.spec, tenant_id=req.tenant_id, offline=req.offline,
+                memory_on=req.memory, guardrails_on=req.guardrails,
+                critic=req.critic, supervisor=req.supervisor,
+            )
+        except WorkflowValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.messages) from exc
+        except BudgetExceeded as exc:
+            raise HTTPException(status_code=402, detail=str(exc)) from exc
+
+    @app.get("/api/workflows/run/stream")
+    def api_run_workflow_stream(spec: str, tenant_id: str = "default", offline: bool = True,
+                                memory: bool = True, guardrails: bool = True,
+                                critic: bool = False, supervisor: bool = False):
+        def gen():
+            try:
+                parsed = WorkflowSpec.model_validate_json(spec)
+                validate_spec(parsed)
+            except (ValidationError, WorkflowValidationError) as exc:
+                yield _sse({"event": "error", "detail": _wf_messages(exc)})
+                return
+            try:
+                for kind, payload in stream_workflow(
+                    parsed, tenant_id=tenant_id, offline=offline, memory_on=memory,
+                    guardrails_on=guardrails, critic=critic, supervisor=supervisor,
+                ):
+                    if kind == "node":
+                        yield _sse({"event": "node", "name": payload})
+                    else:
+                        yield _sse({"event": "result", "result": payload.model_dump()})
+            except BudgetExceeded as exc:
+                yield _sse({"event": "error", "detail": str(exc)})
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
 
     # --- Studio SPA (registered AFTER all routes so it never shadows them) ---
 

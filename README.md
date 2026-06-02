@@ -140,6 +140,11 @@ Views:
   streams the graph's nodes as they run, collapsible per-reply **agent details** (plan, roles,
   steps, tool calls, verdicts, metrics), and export / clear. Sampling controls flow all the way to
   the model gateway.
+- **Workflows** — a drag-and-drop canvas (AutoGen-Studio "Team Builder" style): drag roles on as
+  **step nodes** (role + instruction), connect them into a **dependency DAG**, and Run with a live
+  trace + per-node results. Edges become dependencies executed as a swarm (parallel within a wave,
+  sequential across) — a `StaticPlanComposer` replays the canvas onto the existing engine with no
+  graph changes. Save/load named workflows. (Backed by `/api/workflows*`.)
 - **Playground** — enter a task and toggle every knob (offline, single/swarm, LLM composer,
   memory, guardrails, **critic**, **supervisor**, **ReAct steps**, **vote k**, tenant, and an
   optional structured-output JSON Schema), run it, and read a full **inspector**: plan +

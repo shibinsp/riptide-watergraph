@@ -85,6 +85,24 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 
+[tool.coverage.run]
+source = ["riptide_watergraph"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 100
+# Lines that are genuinely non-executable in any test run (abstract/Protocol bodies,
+# type-only imports, the module entry-point guard). Everything else is exercised — the
+# live/optional paths (litellm, psycopg, the MCP SDK, uvicorn) run under faked boundaries.
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "^\\s*\\.\\.\\.$",
+    "@(abc\\.)?abstractmethod",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

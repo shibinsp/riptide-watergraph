@@ -52,6 +52,10 @@ class OrchestratorState(TypedDict, total=False):
     round: int  # supervisor re-planning round counter
     handoffs: dict[str, int]  # subtask index (str) -> handoff count (cap enforcement)
 
+    # --- Agent capability upgrade (ReAct / voting / structured / clarify) ---
+    clarifications: dict[str, str]  # subtask index (str) -> human clarification answer
+    structured_output: dict[str, Any]  # validated structured final output (if schema set)
+
     # --- Stage 4: guardrails + multi-tenancy ---
     tenant_id: str  # tenant this run belongs to (isolation + cost attribution)
     blocked: bool  # set by guard_input when the request is refused

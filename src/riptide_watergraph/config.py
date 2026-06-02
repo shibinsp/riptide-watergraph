@@ -2,7 +2,24 @@
 
 from __future__ import annotations
 
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class McpServerConfig(BaseModel):
+    """One entry in the MCP-server allowlist.
+
+    The Studio can only connect to servers declared here (and only when
+    ``RIPTIDE_ENABLE_MCP_CONNECT=1``) — the browser never supplies an arbitrary command.
+    ``prefix`` namespaces the registered tool names (e.g. ``"fs."``) to avoid collisions.
+    """
+
+    name: str
+    command: str
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    prefix: str = ""
+    description: str = ""
 
 
 class Settings(BaseSettings):
@@ -37,6 +54,13 @@ class Settings(BaseSettings):
     # Phase D: per-tenant spend ceiling in USD (0 = unlimited). Runs are refused once a
     # tenant's accumulated cost reaches this.
     tenant_budget_usd: float = 0.0
+
+    # MCP-server allowlist (Track v0.10.0). The Studio can connect only to servers listed
+    # here, and only when ``RIPTIDE_ENABLE_MCP_CONNECT=1``. Supply as a JSON array via the
+    # ``RIPTIDE_MCP_SERVERS`` env var, e.g.
+    #   RIPTIDE_MCP_SERVERS='[{"name":"fs","command":"npx",
+    #     "args":["-y","@modelcontextprotocol/server-filesystem","."],"prefix":"fs."}]'
+    riptide_mcp_servers: list[McpServerConfig] = Field(default_factory=list)
 
     def tenant_memory_path(self, tenant_id: str) -> str:
         """Per-tenant memory namespace so lessons never leak across tenants."""

@@ -51,6 +51,7 @@ class GraphContext:
     max_rounds: int = 2  # supervisor re-planning cap (rounds incl. the first)
     max_handoffs: int = 1  # per-subtask agent-to-agent handoff cap
     max_steps: int = 1  # ReAct think->act->observe steps per subtask (1 = single-shot)
+    vote_k: int = 1  # self-consistency samples for direct answers (1 = no voting)
 
     def __post_init__(self) -> None:
         # Per-role models default to the single configured model.
@@ -304,6 +305,25 @@ def make_worker(ctx: GraphContext):
                 Message(role="system", content=_lessons_block(state) + role.system_prompt),
                 Message(role="user", content=_clarified(state, cursor, subtask)),
             ]
+
+            # Self-consistency: sample k times; if all are direct answers, majority-vote.
+            # If any sample wants a tool, abandon voting (so tools/side-effects run once).
+            if ctx.vote_k > 1:
+                samples = []
+                for _ in range(ctx.vote_k):
+                    s = _run(ctx.gateway.complete(
+                        model=ctx.worker_model, messages=messages, tools=tools))
+                    _add_usage(metrics, s)
+                    samples.append(s)
+                if all(not s.tool_calls for s in samples):
+                    voted: WorkerResult = {
+                        "subtask": subtask,
+                        "output": _majority([s.content or "" for s in samples]),
+                        "tool_calls": [],
+                    }
+                    return {"results": [voted], "cursor": cursor + 1, "metrics": metrics}
+                # else fall through to a single normal ReAct pass below.
+
             last_step = ctx.max_steps - 1
             for step in range(ctx.max_steps):
                 result = _run(
@@ -371,6 +391,15 @@ def make_worker(ctx: GraphContext):
             return {}  # unreachable; loop always returns above
 
     return worker
+
+
+def _majority(texts: list[str]) -> str:
+    """Most-common answer by normalized text (ties -> earliest sample)."""
+    from collections import Counter
+
+    counts = Counter(t.strip() for t in texts)
+    winner = counts.most_common(1)[0][0]
+    return next((t for t in texts if t.strip() == winner), texts[0] if texts else "")
 
 
 def _observe(messages: list[Message], call: dict[str, Any], call_id: str | None,

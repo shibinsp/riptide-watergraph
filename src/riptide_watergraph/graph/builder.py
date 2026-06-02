@@ -49,6 +49,7 @@ def build_graph(
     enable_critic: bool = False,
     enable_supervisor: bool = False,
     max_rounds: int = 2,
+    max_steps: int = 1,
 ):
     """Build and compile the orchestrator-worker graph.
 
@@ -76,6 +77,7 @@ def build_graph(
         guardrails=guardrails,
         recall_k=recall_k,
         max_rounds=max_rounds,
+        max_steps=max_steps,
     )
 
     g: StateGraph = StateGraph(OrchestratorState)

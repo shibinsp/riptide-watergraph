@@ -60,6 +60,7 @@ def _run_task(
     llm_composer: bool = False,
     critic: bool = False,
     supervisor: bool = False,
+    react_steps: int = 1,
 ) -> int:
     settings = get_settings()
     init_tracing(settings)
@@ -118,6 +119,7 @@ def _run_task(
             worker_model=worker_model,
             enable_critic=critic,
             enable_supervisor=supervisor,
+            max_steps=react_steps,
         )
 
         print(f" tenant={tenant_id} thread={thread_id}")
@@ -276,6 +278,8 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--supervisor", action="store_true",
                        help="Add a supervisor that re-plans corrective subtasks (implies "
                             "--critic).")
+    run_p.add_argument("--react", type=int, default=1, metavar="N",
+                       help="Max think->act->observe steps per subtask (default 1).")
 
     sub.add_parser("costs", help="Show the per-tenant cost dashboard.")
 
@@ -300,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
             llm_composer=args.llm_composer,
             critic=args.critic,
             supervisor=args.supervisor,
+            react_steps=args.react,
         )
     if args.command == "costs":
         return _show_costs()

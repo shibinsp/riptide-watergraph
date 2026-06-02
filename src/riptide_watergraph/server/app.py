@@ -12,6 +12,8 @@ Endpoints:
 - ``GET  /api/roles``                — the built-in agent roles.
 - ``POST /api/eval``                 — run the evaluation suite, return the report.
 - ``GET  /api/costs``                — per-tenant usage/cost dashboard.
+- ``POST /api/tools/{name}/invoke``  — run a single read-only tool (Tool Runner).
+- ``GET  /api/run/trace``            — stream node-by-node execution as Server-Sent Events.
 - ``GET  /api/connection``           — current AI connection (provider/model, masked key).
 - ``POST /api/connection``           — set the AI provider/model/key at runtime (in-memory).
 - ``POST /api/connection/test``      — ping the configured gateway to validate the connection.
@@ -41,11 +43,12 @@ from ..evaluation import EvalReport, EvalRunner
 from ..gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from ..interfaces.gateway import Message
 from ..observability.cost import BudgetExceeded, CostTracker, TenantTotals, _PRICE_PER_1K
-from ..service import RunResult, SessionStore, run_task
-from ..swarm.roles import DEFAULT_ROLES, AgentRole
+from ..service import RunResult, SessionStore, run_task, stream_task
+from ..swarm.roles import AgentRole, all_roles
 from ..tools import default_registry
+from ..tools.registry import ToolValidationError
 
-_VERSION = "0.4.0"
+_VERSION = "0.5.0"
 _STATIC = Path(__file__).parent / "static"
 _sessions = SessionStore()
 
@@ -88,7 +91,18 @@ class ToolInfo(BaseModel):
     version: str
     description: str
     side_effecting: bool
+    category: str = "general"
+    tags: list[str] = []
     json_schema: dict[str, Any]
+
+
+class ToolInvokeRequest(BaseModel):
+    arguments: dict[str, Any] = {}
+
+
+class ToolInvokeResult(BaseModel):
+    name: str
+    result: str
 
 
 class ConnectionRequest(BaseModel):
@@ -120,7 +134,10 @@ class MetaResponse(BaseModel):
     models: list[str]
     current_model: str
     tool_count: int
+    role_count: int
     role_names: list[str]
+    tool_categories: list[str]
+    role_categories: list[str]
     connection: ConnectionStatus
 
 
@@ -201,6 +218,20 @@ def create_app() -> FastAPI:
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
+    @app.get("/api/run/trace")
+    def api_run_trace(task: str, tenant_id: str = "default", offline: bool = True):
+        def gen():
+            try:
+                for kind, payload in stream_task(task, tenant_id=tenant_id, offline=offline):
+                    if kind == "node":
+                        yield _sse({"event": "node", "name": payload})
+                    else:
+                        yield _sse({"event": "result", "result": payload.model_dump()})
+            except BudgetExceeded as exc:
+                yield _sse({"event": "error", "detail": str(exc)})
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
     @app.post("/sessions/{session_id}/messages", response_model=RunResult)
     def post_message(session_id: str, req: MessageRequest) -> RunResult:
         try:
@@ -224,6 +255,8 @@ def create_app() -> FastAPI:
     @app.get("/api/meta", response_model=MetaResponse)
     def api_meta() -> MetaResponse:
         settings = get_settings()
+        specs = default_registry().all_specs()
+        roles = all_roles()
         return MetaResponse(
             version=_VERSION,
             defaults={
@@ -240,8 +273,11 @@ def create_app() -> FastAPI:
             },
             models=list(_PRICE_PER_1K),
             current_model=settings.riptide_watergraph_model,
-            tool_count=len(default_registry().all_specs()),
-            role_names=list(DEFAULT_ROLES),
+            tool_count=len(specs),
+            role_count=len(roles),
+            role_names=[r.name for r in roles],
+            tool_categories=sorted({s.category for s in specs}),
+            role_categories=sorted({r.category for r in roles}),
             connection=_connection_status(),
         )
 
@@ -251,7 +287,25 @@ def create_app() -> FastAPI:
 
     @app.get("/api/roles", response_model=list[AgentRole])
     def api_roles() -> list[AgentRole]:
-        return list(DEFAULT_ROLES.values())
+        return all_roles()
+
+    @app.post("/api/tools/{name}/invoke", response_model=ToolInvokeResult)
+    def api_invoke_tool(name: str, req: ToolInvokeRequest) -> ToolInvokeResult:
+        registry = default_registry()
+        try:
+            spec = registry.get(name)
+        except (KeyError, ToolValidationError) as exc:
+            raise HTTPException(status_code=404, detail=f"unknown tool: {name}") from exc
+        if spec.side_effecting:
+            raise HTTPException(
+                status_code=400,
+                detail="refusing to run a side-effecting tool from the Tool Runner",
+            )
+        try:
+            result = asyncio.run(registry.invoke(name, req.arguments))
+        except ToolValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return ToolInvokeResult(name=name, result=str(result))
 
     @app.post("/api/eval", response_model=EvalReport)
     def api_eval(req: EvalRequest) -> EvalReport:

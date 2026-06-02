@@ -6,6 +6,7 @@ let META = null;
 // ---------- icons (inline SVG paths) ----------
 const ICONS = {
   playground: "M5 3l14 9-14 9V3z",
+  chat: "M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2zM8 9h8M8 13h5",
   sessions: "M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z",
   tools: "M14.7 6.3a4 4 0 00-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 005.4-5.4l-2.5 2.5-2-2 2.5-2.5z",
   roles: "M16 11a4 4 0 10-8 0 4 4 0 008 0zM4 21a8 8 0 0116 0",
@@ -141,7 +142,7 @@ function saveHistory(entry) {
 
 // ---------- nav + router ----------
 const NAV = [
-  { group: "Workspace", items: [["playground", "Playground"], ["sessions", "Sessions"], ["history", "History"]] },
+  { group: "Workspace", items: [["chat", "Chat"], ["playground", "Playground"], ["history", "History"]] },
   { group: "Library", items: [["tools", "Tools"], ["roles", "Roles"], ["tool_runner", "Tool Runner"]] },
   { group: "Insights", items: [["eval", "Eval"], ["costs", "Costs"]] },
   { group: "System", items: [["connections", "Connections"]] },
@@ -424,34 +425,164 @@ VIEWS.connections = function () {
   renderStatus((META && META.connection) || { configured: false });
 };
 
-// =================== Sessions ===================
-VIEWS.sessions = function () {
-  const sid = el("input", { type: "text", id: "s-id", value: "studio-1" });
-  const msg = el("textarea", { id: "s-msg", placeholder: "Send a follow-up turn; prior answers are fed back as context." });
-  const log = el("div", { id: "s-log", class: "stack" });
-  const send = el("button", { class: "btn primary" }, "Send");
-  const load = el("button", { class: "btn" }, "Load transcript");
-  async function transcript() {
-    log.innerHTML = "";
-    const data = await api("/sessions/" + encodeURIComponent(sid.value));
-    if (!data.turns.length) { log.appendChild(el("div", { class: "empty" }, "No turns yet.")); return; }
-    data.turns.forEach((t, i) => log.appendChild(panel(el("div", null,
-      el("div", { class: "kv" }, el("span", { class: "chip" }, "turn " + (i + 1))),
-      el("div", null, el("strong", null, "You: "), t.task),
-      el("div", null, el("strong", null, "Agent: "), t.answer || "(none)")))));
+// =================== Chat ===================
+const PRESETS = { Precise: 0.0, Balanced: 0.4, Creative: 0.8 };
+
+function turnDetails(t) {
+  // Collapsible inspector-style details inside an assistant bubble.
+  const box = el("div", { class: "details" });
+  if (t.plan && t.plan.length) box.appendChild(card("Plan & roles", zip(t.plan, t.roles), false));
+  if (t.results && t.results.length) {
+    const items = t.results.map((res, i) => {
+      const tc = (res.tool_calls || []).map((c) => el("span", { class: "chip" }, (c.function || {}).name || "?"));
+      return el("div", { style: "margin-bottom:8px" },
+        el("div", { class: "kv" }, el("span", { class: "chip" }, "#" + i),
+          el("span", { class: "chip" }, (t.roles && t.roles[i]) || "generalist"), el("strong", null, res.subtask || "")),
+        el("div", { class: "muted" }, res.output || ""),
+        tc.length ? el("div", { class: "pills" }, ...tc) : null);
+    });
+    box.appendChild(card("Agent steps", el("div", null, ...items), false));
   }
-  send.onclick = async () => {
-    send.disabled = true;
-    try { await jpost("/sessions/" + encodeURIComponent(sid.value) + "/messages", { task: msg.value, offline: true }); msg.value = ""; await transcript(); }
-    catch (e) { toast(e.message, "bad"); } finally { send.disabled = false; }
-  };
-  load.onclick = transcript;
-  view().append(viewHead("Sessions", "Multi-turn conversations — each turn sees prior answers."),
-    el("div", { class: "stack" },
-      panel(el("div", null,
-        el("div", { class: "row" }, el("div", { class: "field" }, el("label", { class: "lbl" }, "Session id"), sid)),
-        el("label", { class: "lbl", style: "margin-top:12px" }, "Message"), msg,
-        el("div", { class: "btn-row" }, send, load))), log));
+  if (t.verdicts && t.verdicts.length) {
+    const rows = t.verdicts.map((v, i) => el("tr", null, el("td", null, String(i)),
+      el("td", null, el("span", { class: v.verdict === "pass" ? "badge ok" : "badge bad" }, v.verdict || "?")),
+      el("td", null, v.reason || "")));
+    box.appendChild(card("Critic verdicts", el("table", null,
+      el("tr", null, el("th", null, "#"), el("th", null, "Verdict"), el("th", null, "Reason")), ...rows), false));
+  }
+  if (t.metrics && Object.keys(t.metrics).length) box.appendChild(card("Metrics", copyPre(t.metrics), false));
+  return box;
+}
+function bubble(role, contentNode, meta) {
+  return el("div", { class: "msg " + role },
+    el("div", { class: "avatar" }, role === "user" ? "U" : "≈"),
+    el("div", { class: "msg-body" },
+      meta ? el("div", { class: "msg-meta" }, meta) : null, contentNode));
+}
+
+VIEWS.chat = function () {
+  const settings = (function () {
+    const sid = el("input", { type: "text", id: "c-sid", value: "chat-1" });
+    const temp = el("input", { type: "range", id: "c-temp", min: "0", max: "2", step: "0.1", value: "0" });
+    const tempVal = el("span", { class: "muted" }, "0.0");
+    temp.oninput = () => { tempVal.textContent = parseFloat(temp.value).toFixed(1); };
+    const topp = el("input", { type: "number", id: "c-topp", class: "num", min: "0", max: "1", step: "0.05", placeholder: "—" });
+    const maxtok = el("input", { type: "number", id: "c-maxtok", class: "num", min: "1", placeholder: "—" });
+    const presetRow = el("div", { class: "segmented" },
+      ...Object.keys(PRESETS).map((name) => el("button", {
+        onclick: () => { temp.value = String(PRESETS[name]); temp.oninput(); },
+      }, name)));
+    const knob = (id, label, on) => switchEl(id, label, on);
+    return {
+      sid, temp, topp, maxtok,
+      node: el("div", null,
+        el("label", { class: "lbl" }, "Session"), sid,
+        el("label", { class: "lbl", style: "margin-top:14px" }, "Sampling"), presetRow,
+        el("div", { class: "row", style: "margin-top:10px; align-items:center" },
+          el("div", null, el("label", { class: "lbl" }, "Temperature"),
+            el("div", { style: "display:flex; gap:8px; align-items:center" }, temp, tempVal))),
+        el("div", { class: "row", style: "margin-top:10px" },
+          el("div", null, el("label", { class: "lbl" }, "top_p"), topp),
+          el("div", null, el("label", { class: "lbl" }, "max_tokens"), maxtok)),
+        el("label", { class: "lbl", style: "margin-top:14px" }, "Per-turn options"),
+        el("div", { class: "switches" },
+          knob("c-offline", "Offline", true), knob("c-memory", "Memory", false),
+          knob("c-guard", "Guardrails", true), knob("c-single", "Single", false),
+          knob("c-llm", "LLM composer", false), knob("c-critic", "Critic", false),
+          knob("c-super", "Supervisor", false)),
+        el("div", { class: "row", style: "margin-top:10px" },
+          el("div", null, el("label", { class: "lbl" }, "ReAct steps"),
+            el("input", { type: "number", id: "c-react", class: "num", min: "1", value: "1" })),
+          el("div", null, el("label", { class: "lbl" }, "Vote k"),
+            el("input", { type: "number", id: "c-vote", class: "num", min: "1", value: "1" })))),
+    };
+  })();
+
+  const messages = el("div", { class: "chat-log", id: "chat-log" });
+  const input = el("textarea", { id: "chat-input", class: "chat-input", placeholder: "Message the agents…  (Enter to send, Shift+Enter for newline)" });
+  const sendBtn = el("button", { class: "btn primary" }, "Send");
+  const exportBtn = el("button", { class: "btn", onclick: () => exportChat() }, "Export");
+  const clearBtn = el("button", { class: "btn", onclick: () => clearChat() }, "Clear");
+
+  function num(id) { const v = document.getElementById(id).value; return v === "" ? null : v; }
+  function params(task) {
+    const p = { task, offline: document.getElementById("c-offline").checked,
+      memory: document.getElementById("c-memory").checked, guardrails: document.getElementById("c-guard").checked,
+      single: document.getElementById("c-single").checked, llm_composer: document.getElementById("c-llm").checked,
+      critic: document.getElementById("c-critic").checked, supervisor: document.getElementById("c-super").checked,
+      react_steps: parseInt(document.getElementById("c-react").value, 10) || 1,
+      vote_k: parseInt(document.getElementById("c-vote").value, 10) || 1,
+      temperature: parseFloat(settings.temp.value) };
+    if (num("c-topp") != null) p.top_p = parseFloat(num("c-topp"));
+    if (num("c-maxtok") != null) p.max_tokens = parseInt(num("c-maxtok"), 10);
+    return p;
+  }
+  function addAssistant(t) {
+    const body = el("div", null, el("div", null, t.answer || "(none)"));
+    const det = turnDetails(t);
+    if (det.childNodes.length) {
+      const toggle = el("button", { class: "btn", style: "margin-top:8px",
+        onclick: () => { det.style.display = det.style.display === "none" ? "" : "none"; } }, "details");
+      det.style.display = "none";
+      body.append(toggle, det);
+    }
+    const meta = (t.mode ? t.mode : "") + (t.blocked ? " · blocked" : "");
+    messages.appendChild(bubble("agent", body, meta));
+    messages.scrollTop = messages.scrollHeight;
+  }
+  async function loadTranscript() {
+    messages.innerHTML = "";
+    const data = await api("/sessions/" + encodeURIComponent(settings.sid.value));
+    if (!data.turns.length) { messages.appendChild(el("div", { class: "empty" }, "No messages yet — say hello.")); return; }
+    data.turns.forEach((t) => { messages.appendChild(bubble("user", el("div", null, t.task))); addAssistant(t); });
+  }
+  function send() {
+    const task = input.value.trim();
+    if (!task) return;
+    input.value = "";
+    messages.appendChild(bubble("user", el("div", null, task)));
+    const thinking = el("div", null, el("span", { class: "spinner" }), el("span", { class: "pills", id: "think-steps" }));
+    const thinkBubble = bubble("agent", thinking, "thinking…");
+    messages.appendChild(thinkBubble);
+    messages.scrollTop = messages.scrollHeight;
+    sendBtn.disabled = true;
+    const qs = new URLSearchParams(params(task));
+    const es = new EventSource("/api/sessions/" + encodeURIComponent(settings.sid.value) + "/messages/stream?" + qs.toString());
+    es.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.event === "node") {
+        thinking.querySelector("#think-steps").appendChild(el("span", { class: "chip" }, m.name));
+      } else if (m.event === "result") {
+        es.close(); thinkBubble.remove(); addAssistant(m.result); sendBtn.disabled = false;
+      } else if (m.event === "error") {
+        es.close(); thinkBubble.remove(); messages.appendChild(bubble("agent", el("div", { class: "error" }, m.detail))); sendBtn.disabled = false;
+      }
+    };
+    es.onerror = () => { es.close(); sendBtn.disabled = false; };
+  }
+  sendBtn.onclick = send;
+  input.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
+
+  async function exportChat() {
+    const data = await api("/sessions/" + encodeURIComponent(settings.sid.value));
+    const md = data.turns.map((t) => "**You:** " + t.task + "\n\n**Agent:** " + (t.answer || "")).join("\n\n---\n\n");
+    const blob = new Blob([md || "(empty)"], { type: "text/markdown" });
+    const a = el("a", { href: URL.createObjectURL(blob), download: settings.sid.value + ".md" });
+    a.click(); toast("Exported", "ok");
+  }
+  async function clearChat() {
+    await fetch("/sessions/" + encodeURIComponent(settings.sid.value), { method: "DELETE" });
+    await loadTranscript(); toast("Chat cleared", "ok");
+  }
+
+  view().append(viewHead("Chat", "Converse with the multi-agent graph; tune the model and per-turn options."),
+    el("div", { class: "chat-wrap" },
+      el("div", { class: "chat-main" }, messages,
+        el("div", { class: "composer" }, input,
+          el("div", { class: "composer-actions" }, sendBtn, exportBtn, clearBtn))),
+      el("aside", { class: "chat-settings" }, el("div", { class: "card" },
+        el("div", { class: "card-pad" }, el("h2", { style: "margin-top:0" }, "Settings"), settings.node)))));
+  loadTranscript();
 };
 
 // =================== Tools ===================
@@ -632,6 +763,6 @@ async function boot() {
     document.getElementById("version").textContent = "v" + META.version;
     renderConnPill(META.connection);
   } catch (e) { META = { defaults: {}, models: [], current_model: "?", version: "?", connection: { configured: false } }; }
-  show("playground");
+  show("chat");
 }
 boot();

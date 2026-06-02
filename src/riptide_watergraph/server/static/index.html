@@ -5,32 +5,45 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Like Water Studio · riptide-watergraph</title>
   <link rel="stylesheet" href="/static/styles.css" />
+  <script>
+    // Set theme before paint to avoid a flash.
+    (function () {
+      try {
+        var t = localStorage.getItem("lws-theme");
+        if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) { document.documentElement.setAttribute("data-theme", "light"); }
+    })();
+  </script>
 </head>
 <body>
-  <div class="app">
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="wave">~</div>
-        <div>
-          <div class="brand-title">Like Water Studio</div>
-          <div class="brand-sub">riptide-watergraph</div>
+  <div class="shell">
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="logo" aria-hidden="true">≈</div>
+        <div class="wordmark">
+          <span class="wordmark-title">Like Water Studio</span>
+          <span class="wordmark-sub">riptide-watergraph</span>
         </div>
       </div>
-      <nav id="nav">
-        <button class="nav-item active" data-view="playground">Playground</button>
-        <button class="nav-item" data-view="sessions">Sessions</button>
-        <button class="nav-item" data-view="tools">Tools</button>
-        <button class="nav-item" data-view="roles">Roles</button>
-        <button class="nav-item" data-view="eval">Eval</button>
-        <button class="nav-item" data-view="costs">Costs</button>
-      </nav>
-      <div class="sidebar-foot">
-        <span id="meta-model" class="badge">model: …</span>
-        <span id="meta-version" class="badge ghost">v…</span>
+      <div class="topbar-right">
+        <button id="conn-pill" class="conn-pill" title="AI connection" data-view="connections">
+          <span class="dot"></span><span id="conn-pill-label">Offline</span>
+        </button>
+        <button id="theme-toggle" class="icon-btn" title="Toggle theme" aria-label="Toggle theme"></button>
+        <span id="version" class="version">v—</span>
       </div>
-    </aside>
-    <main id="view" class="view"></main>
+    </header>
+
+    <div class="body">
+      <aside class="sidebar">
+        <nav id="nav"></nav>
+      </aside>
+      <main id="view" class="view"></main>
+    </div>
   </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

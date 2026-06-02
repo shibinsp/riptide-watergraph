@@ -51,6 +51,7 @@ def build_graph(
     max_rounds: int = 2,
     max_steps: int = 1,
     vote_k: int = 1,
+    final_schema: dict[str, Any] | None = None,
 ):
     """Build and compile the orchestrator-worker graph.
 
@@ -80,6 +81,7 @@ def build_graph(
         max_rounds=max_rounds,
         max_steps=max_steps,
         vote_k=vote_k,
+        final_schema=final_schema,
     )
 
     g: StateGraph = StateGraph(OrchestratorState)

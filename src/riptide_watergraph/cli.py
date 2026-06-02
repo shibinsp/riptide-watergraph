@@ -8,6 +8,7 @@ tenant. ``riptide costs`` prints the per-tenant cost dashboard.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 import uuid
@@ -62,6 +63,7 @@ def _run_task(
     supervisor: bool = False,
     react_steps: int = 1,
     vote_k: int = 1,
+    final_schema: dict[str, Any] | None = None,
 ) -> int:
     settings = get_settings()
     init_tracing(settings)
@@ -122,6 +124,7 @@ def _run_task(
             enable_supervisor=supervisor,
             max_steps=react_steps,
             vote_k=vote_k,
+            final_schema=final_schema,
         )
 
         print(f" tenant={tenant_id} thread={thread_id}")
@@ -174,6 +177,10 @@ def _print_result(result: dict, *, memory_on: bool, memory) -> None:
             print(f"   - {ln}")
 
     print("\n FINAL ANSWER\n" + (result.get("final_answer") or "(none)"))
+
+    structured = result.get("structured_output")
+    if structured:
+        print("\n STRUCTURED OUTPUT\n" + json.dumps(structured, indent=2))
 
     metrics = result.get("metrics") or {}
     total = metrics.get("tool_calls_total", 0)
@@ -284,6 +291,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="Max think->act->observe steps per subtask (default 1).")
     run_p.add_argument("--vote", type=int, default=1, metavar="K",
                        help="Self-consistency samples for direct answers (default 1).")
+    run_p.add_argument("--schema", metavar="PATH",
+                       help="Path to a JSON Schema file; finalize emits a validated "
+                            "structured output matching it.")
 
     sub.add_parser("costs", help="Show the per-tenant cost dashboard.")
 
@@ -297,6 +307,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command == "run":
+        final_schema = json.loads(Path(args.schema).read_text()) if args.schema else None
         return _run_task(
             args.task,
             auto_approve=args.auto_approve,
@@ -310,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
             supervisor=args.supervisor,
             react_steps=args.react,
             vote_k=args.vote,
+            final_schema=final_schema,
         )
     if args.command == "costs":
         return _show_costs()

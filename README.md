@@ -1,6 +1,9 @@
 # Riptide-Watergraph
 
+[![PyPI](https://img.shields.io/pypi/v/riptide-watergraph.svg)](https://pypi.org/project/riptide-watergraph/)
+[![Python](https://img.shields.io/pypi/pyversions/riptide-watergraph.svg)](https://pypi.org/project/riptide-watergraph/)
 [![CI](https://github.com/shibinsp/riptide-watergraph/actions/workflows/ci.yml/badge.svg)](https://github.com/shibinsp/riptide-watergraph/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 A reusable, enterprise-grade multi-agent framework — conceptually *like AutoGen*, but built as a **thin layer on [LangGraph](https://github.com/langchain-ai/langgraph)** rather than re-authoring the orchestration runtime. The design goal is to be **"like water"**: a layered, modular substrate where every layer is swappable behind a thin interface.
 
@@ -66,13 +69,18 @@ composer chooses a swarm.
 
 Prerequisites: Python 3.11+. No compiler or other toolchain needed.
 
-```bash
-# From PyPI (once a vX.Y.Z tag is published — see "Releasing" below):
-pip install riptide-watergraph            # core
-pip install "riptide-watergraph[server]"  # + Studio web UI (riptide serve)
-pip install "riptide-watergraph[all]"      # + LiteLLM, MCP, observability
+**It's on [PyPI](https://pypi.org/project/riptide-watergraph/):**
 
-# From GitHub (works today, before a PyPI release):
+```bash
+pip install riptide-watergraph             # core
+pip install "riptide-watergraph[server]"   # + Studio web UI (riptide serve)
+pip install "riptide-watergraph[all]"       # + LiteLLM, MCP, observability
+
+# Then:
+riptide serve                              # open http://127.0.0.1:8000  (the Studio)
+riptide run "What is 21 * 2?" --offline    # CLI, no API key
+
+# Latest from GitHub (unreleased main):
 pip install "git+https://github.com/shibinsp/riptide-watergraph.git#egg=riptide-watergraph[server]"
 ```
 

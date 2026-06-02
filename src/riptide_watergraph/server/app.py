@@ -58,7 +58,7 @@ from ..tools import default_registry
 from ..tools.registry import ToolValidationError
 from ..workflows import WorkflowSpec, WorkflowStore, WorkflowValidationError, validate_spec
 
-_VERSION = "0.7.0"
+_VERSION = "0.8.0"
 _STATIC = Path(__file__).parent / "static"
 _sessions = SessionStore()
 _workflows = WorkflowStore()

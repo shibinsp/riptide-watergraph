@@ -14,6 +14,7 @@ const ICONS = {
   costs: "M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6",
   connections: "M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20M12 2a15 15 0 010 20 15 15 0 010-20z",
   tool_runner: "M5 3l14 9-14 9V3zM19 3v18",
+  workflows: "M4 5a2 2 0 100 4 2 2 0 000-4zM18 15a2 2 0 100 4 2 2 0 000-4zM18 5a2 2 0 100 4 2 2 0 000-4zM6 7h8a2 2 0 012 2v0M6 7v6a2 2 0 002 2h8",
   history: "M3 3v6h6M3 9a9 9 0 102.5-6.4L3 9M12 7v5l4 2",
   sun: "M12 17a5 5 0 100-10 5 5 0 000 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
   moon: "M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z",
@@ -142,7 +143,7 @@ function saveHistory(entry) {
 
 // ---------- nav + router ----------
 const NAV = [
-  { group: "Workspace", items: [["chat", "Chat"], ["playground", "Playground"], ["history", "History"]] },
+  { group: "Workspace", items: [["chat", "Chat"], ["playground", "Playground"], ["workflows", "Workflows"], ["history", "History"]] },
   { group: "Library", items: [["tools", "Tools"], ["roles", "Roles"], ["tool_runner", "Tool Runner"]] },
   { group: "Insights", items: [["eval", "Eval"], ["costs", "Costs"]] },
   { group: "System", items: [["connections", "Connections"]] },
@@ -737,6 +738,243 @@ VIEWS.costs = async function () {
   view().appendChild(el("div", { class: "card" }, el("div", { class: "card-pad" },
     el("table", null, el("tr", null, el("th", null, "Tenant"), el("th", null, "Runs"),
       el("th", null, "Tokens"), el("th", null, "Cost"), el("th", null, "Blocked")), ...rows))));
+};
+
+// =================== Workflows (drag-and-drop canvas) ===================
+const WF_W = 184, WF_H = 76;
+function runWorkflowTrace(spec, out, done) {
+  out.innerHTML = "";
+  const steps = el("div", { class: "pills" });
+  out.appendChild(panel(el("div", null, el("label", { class: "lbl" }, "Execution trace"),
+    el("div", null, el("span", { class: "spinner" }), "running…"), steps)));
+  const es = new EventSource("/api/workflows/run/stream?spec=" + encodeURIComponent(JSON.stringify(spec)) + "&offline=true");
+  es.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.event === "node") steps.appendChild(el("span", { class: "chip" }, m.name));
+    else if (m.event === "result") { es.close(); out.innerHTML = ""; out.appendChild(renderInspector(m.result)); done(); }
+    else if (m.event === "error") { es.close(); out.innerHTML = ""; out.appendChild(panel(el("div", { class: "banner bad" }, [].concat(m.detail).join(", ")))); done(); }
+  };
+  es.onerror = () => { es.close(); done(); };
+}
+
+VIEWS.workflows = async function () {
+  const roleNames = (META && META.role_names) || ["generalist"];
+  let nodes = [];   // {id, role, subtask, x, y, elNode, elSub, elHead}
+  let edges = [];   // {source, target, elPath, elHit}
+  let nextId = 1, connectFrom = null, selected = null;
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("class", "wf-edges");
+  const defs = document.createElementNS(svgNS, "defs");
+  defs.innerHTML = '<marker id="wf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ink-2)"/></marker>';
+  svg.appendChild(defs);
+  const live = document.createElementNS(svgNS, "path");
+  live.setAttribute("class", "wf-edge-live");
+  svg.appendChild(live);
+  const nodeLayer = el("div", { class: "wf-nodes" });
+  const canvas = el("div", { class: "wf-canvas" }, svg, nodeLayer);
+  const canvasWrap = el("div", { class: "wf-canvas-wrap" }, canvas);
+  const out = el("div", { class: "stack", style: "margin-top:14px" });
+
+  const outPt = (n) => ({ x: n.x + WF_W / 2, y: n.y + WF_H });
+  const inPt = (n) => ({ x: n.x + WF_W / 2, y: n.y });
+  const edgePath = (a, b) => {
+    const dy = Math.max(36, Math.abs(b.y - a.y) * 0.5);
+    return `M ${a.x} ${a.y} C ${a.x} ${a.y + dy}, ${b.x} ${b.y - dy}, ${b.x} ${b.y}`;
+  };
+  const byId = (id) => nodes.find((n) => n.id === id);
+  function growCanvas() {
+    const w = Math.max(900, ...nodes.map((n) => n.x + WF_W + 60));
+    const h = Math.max(560, ...nodes.map((n) => n.y + WF_H + 60));
+    canvas.style.width = w + "px"; canvas.style.height = h + "px";
+    svg.setAttribute("width", w); svg.setAttribute("height", h);
+  }
+  function redrawEdges(id) {
+    edges.forEach((e) => {
+      if (id && e.source !== id && e.target !== id) return;
+      const a = byId(e.source), b = byId(e.target);
+      if (!a || !b) return;
+      const d = edgePath(outPt(a), inPt(b));
+      e.elPath.setAttribute("d", d); e.elHit.setAttribute("d", d);
+    });
+  }
+  function wouldCycle(src, tgt) {
+    // adding src->tgt creates a cycle if src is reachable from tgt
+    const adj = {}; nodes.forEach((n) => (adj[n.id] = []));
+    edges.forEach((e) => adj[e.source].push(e.target));
+    adj[tgt] = (adj[tgt] || []).concat(src);
+    const seen = new Set(); const stack = [tgt];
+    while (stack.length) { const c = stack.pop(); if (c === src) return true;
+      if (seen.has(c)) continue; seen.add(c); (adj[c] || []).forEach((x) => stack.push(x)); }
+    return false;
+  }
+  function selectNode(n) {
+    selected = n;
+    nodeLayer.querySelectorAll(".wf-node").forEach((el2) => el2.classList.toggle("sel", n && el2.dataset.id === n.id));
+    renderInspector2();
+  }
+  function addEdge(source, target) {
+    if (source === target || edges.some((e) => e.source === source && e.target === target)) return;
+    if (wouldCycle(source, target)) { toast("That would create a cycle", "bad"); return; }
+    const hit = document.createElementNS(svgNS, "path"); hit.setAttribute("class", "wf-edge-hit");
+    const path = document.createElementNS(svgNS, "path"); path.setAttribute("class", "wf-edge");
+    path.setAttribute("marker-end", "url(#wf-arrow)");
+    const e = { source, target, elPath: path, elHit: hit };
+    hit.onclick = () => { svg.removeChild(path); svg.removeChild(hit); edges = edges.filter((x) => x !== e); };
+    svg.appendChild(hit); svg.appendChild(path); edges.push(e); redrawEdges(source);
+  }
+  function addNode(role, x, y, subtask, id) {
+    const n = { id: id || ("n" + (nextId++)), role, subtask: subtask || "", x, y };
+    const head = el("div", { class: "wf-node-head" }, el("span", null, n.role),
+      el("button", { class: "wf-del", title: "delete",
+        onclick: (ev) => { ev.stopPropagation(); removeNode(n); } }, "×"));
+    const sub = el("div", { class: "wf-node-sub" }, n.subtask || "(click to add instruction)");
+    const portIn = el("div", { class: "wf-port in", title: "input" });
+    const portOut = el("div", { class: "wf-port out", title: "output (click, then click a target's input)" });
+    const node = el("div", { class: "wf-node", "data-id": n.id }, portIn, head, sub, portOut);
+    node.style.transform = `translate(${x}px, ${y}px)`;
+    node.onclick = (ev) => { ev.stopPropagation(); selectNode(n); };
+    portOut.onclick = (ev) => { ev.stopPropagation(); connectFrom = n; toast("Now click a target node's top port", "ok"); };
+    portIn.onclick = (ev) => { ev.stopPropagation(); if (connectFrom) { addEdge(connectFrom.id, n.id); connectFrom = null; live.removeAttribute("d"); } };
+    // drag the header to move the node
+    head.onpointerdown = (ev) => {
+      if (ev.target.classList.contains("wf-del")) return;
+      ev.preventDefault(); head.setPointerCapture(ev.pointerId);
+      const sx = ev.clientX, sy = ev.clientY, ox = n.x, oy = n.y;
+      const move = (e2) => { n.x = Math.max(0, ox + (e2.clientX - sx)); n.y = Math.max(0, oy + (e2.clientY - sy));
+        node.style.transform = `translate(${n.x}px, ${n.y}px)`; redrawEdges(n.id); };
+      const up = () => { head.releasePointerCapture(ev.pointerId); head.onpointermove = null; head.onpointerup = null; growCanvas(); };
+      head.onpointermove = move; head.onpointerup = up;
+    };
+    n.elNode = node; n.elSub = sub; n.elHead = head.firstChild;
+    nodes.push(n); nodeLayer.appendChild(node); growCanvas(); selectNode(n);
+    return n;
+  }
+  function removeNode(n) {
+    edges.filter((e) => e.source === n.id || e.target === n.id).forEach((e) => {
+      svg.removeChild(e.elPath); svg.removeChild(e.elHit); });
+    edges = edges.filter((e) => e.source !== n.id && e.target !== n.id);
+    nodeLayer.removeChild(n.elNode); nodes = nodes.filter((x) => x !== n);
+    if (selected === n) selectNode(null);
+  }
+  canvas.onclick = () => { connectFrom = null; live.removeAttribute("d"); selectNode(null); };
+  canvas.ondragover = (ev) => ev.preventDefault();
+  canvas.ondrop = (ev) => {
+    ev.preventDefault();
+    const role = ev.dataTransfer.getData("text/role"); if (!role) return;
+    const r = canvas.getBoundingClientRect();
+    addNode(role, ev.clientX - r.left - WF_W / 2, ev.clientY - r.top - WF_H / 2);
+  };
+
+  // --- palette (draggable roles) ---
+  const palSearch = el("input", { type: "text", placeholder: "Search roles…" });
+  const palList = el("div", { class: "wf-pal-list" });
+  function renderPalette(q) {
+    palList.innerHTML = "";
+    roleNames.filter((r) => !q || r.includes(q)).slice(0, 200).forEach((r) => {
+      const item = el("div", { class: "wf-pal-item", draggable: "true" }, r);
+      item.ondragstart = (ev) => ev.dataTransfer.setData("text/role", r);
+      item.onclick = () => addNode(r, 40 + (nodes.length % 3) * 30, 40 + nodes.length * 24);
+      palList.appendChild(item);
+    });
+  }
+  palSearch.oninput = () => renderPalette(palSearch.value.toLowerCase());
+  renderPalette("");
+
+  // --- inspector ---
+  const insp = el("div", { class: "wf-inspector" });
+  function renderInspector2() {
+    insp.innerHTML = "";
+    if (!selected) { insp.appendChild(el("div", { class: "muted" }, "Select a node to edit, or drag a role from the palette.")); return; }
+    const roleSel = el("select", { onchange: (e) => { selected.role = e.target.value; selected.elHead.textContent = selected.role; } },
+      ...roleNames.map((r) => el("option", { value: r, ...(r === selected.role ? { selected: "selected" } : {}) }, r)));
+    const sub = el("textarea", { placeholder: "Instruction for this step…",
+      oninput: (e) => { selected.subtask = e.target.value; selected.elSub.textContent = e.target.value || "(click to add instruction)"; } });
+    sub.value = selected.subtask;
+    insp.append(el("label", { class: "lbl" }, "Role"), roleSel,
+      el("label", { class: "lbl", style: "margin-top:10px" }, "Instruction"), sub,
+      el("button", { class: "btn", style: "margin-top:10px", onclick: () => removeNode(selected) }, "Delete node"),
+      el("div", { class: "hint", style: "margin-top:10px" }, "Side-effecting tools don't execute on the workflow (swarm) path — no human approval there."));
+  }
+  renderInspector2();
+
+  // --- toolbar ---
+  const nameInput = el("input", { type: "text", placeholder: "workflow name", value: "untitled" });
+  const goalInput = el("input", { type: "text", placeholder: "optional goal (memory/usage context)" });
+  const loadSel = el("select", null, el("option", { value: "" }, "Load…"));
+  const traceToggle = switchEl("wf-trace", "Live trace", true);
+  const critic = switchEl("wf-critic", "Critic", false);
+  const guard = switchEl("wf-guard", "Guardrails", true);
+  const runBtn = el("button", { class: "btn primary" }, "Run workflow");
+
+  function buildSpec(forRun) {
+    return {
+      name: nameInput.value || "untitled", goal: goalInput.value || nameInput.value, mode: "auto",
+      nodes: nodes.map((n) => forRun ? { id: n.id, role: n.role, subtask: n.subtask || n.role }
+        : { id: n.id, role: n.role, subtask: n.subtask, x: Math.round(n.x), y: Math.round(n.y) }),
+      edges: edges.map((e) => ({ source: e.source, target: e.target })),
+    };
+  }
+  runBtn.onclick = async () => {
+    if (!nodes.length) { toast("Add at least one node", "bad"); return; }
+    runBtn.disabled = true;
+    const spec = buildSpec(true);
+    if (document.getElementById("wf-trace").checked) {
+      runWorkflowTrace(spec, out, () => { runBtn.disabled = false; });
+    } else {
+      out.innerHTML = ""; out.appendChild(panel(el("div", null, el("span", { class: "spinner" }), "running…")));
+      try {
+        const r = await jpost("/api/workflows/run", { spec, offline: true,
+          guardrails: document.getElementById("wf-guard").checked, critic: document.getElementById("wf-critic").checked });
+        out.innerHTML = ""; out.appendChild(renderInspector(r));
+      } catch (e) { out.innerHTML = ""; out.appendChild(panel(el("div", { class: "banner bad" }, e.message))); }
+      finally { runBtn.disabled = false; }
+    }
+  };
+  async function refreshSaved() {
+    const names = await api("/api/workflows");
+    loadSel.innerHTML = ""; loadSel.appendChild(el("option", { value: "" }, "Load…"));
+    names.forEach((n) => loadSel.appendChild(el("option", { value: n }, n)));
+  }
+  async function save() {
+    try {
+      await jpost("/api/workflows", buildSpec(false));
+      toast("Workflow saved", "ok"); await refreshSaved();
+    } catch (e) { toast([].concat(e.message).join(", "), "bad"); }
+  }
+  function loadSpec(spec) {
+    nodes.slice().forEach(removeNode); nodes = []; edges = [];
+    nameInput.value = spec.name || "untitled"; goalInput.value = spec.goal || "";
+    (spec.nodes || []).forEach((n) => addNode(n.role, n.x || 40, n.y || 40, n.subtask, n.id));
+    nextId = nodes.length + 1;
+    (spec.edges || []).forEach((e) => addEdge(e.source, e.target));
+    selectNode(null);
+  }
+  loadSel.onchange = async () => { if (!loadSel.value) return;
+    try { loadSpec(await api("/api/workflows/" + encodeURIComponent(loadSel.value))); } catch (e) { toast(e.message, "bad"); } };
+
+  const toolbar = el("div", { class: "wf-toolbar" },
+    nameInput, goalInput,
+    el("button", { class: "btn", onclick: save }, "Save"), loadSel,
+    el("button", { class: "btn", onclick: () => loadSpec({ name: "untitled", nodes: [], edges: [] }) }, "Clear"),
+    traceToggle, guard, critic, runBtn);
+
+  view().append(viewHead("Workflows", "Drag roles onto the canvas, connect them into a dependency DAG, and run it."),
+    toolbar,
+    el("div", { class: "wf-shell" },
+      el("aside", { class: "wf-palette" }, el("div", { class: "lbl" }, "Roles"), palSearch, palList),
+      canvasWrap,
+      el("aside", { class: "wf-inspector-wrap" }, el("div", { class: "card" }, el("div", { class: "card-pad" }, insp)))),
+    out);
+  growCanvas();
+  refreshSaved();
+  // pointer-follow for the in-progress connection
+  canvas.onpointermove = (ev) => {
+    if (!connectFrom) return;
+    const r = canvas.getBoundingClientRect();
+    live.setAttribute("d", edgePath(outPt(connectFrom), { x: ev.clientX - r.left, y: ev.clientY - r.top }));
+  };
 };
 
 // ---------- theme ----------

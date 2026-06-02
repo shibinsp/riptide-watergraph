@@ -22,6 +22,8 @@ class ToolSpec(BaseModel):
     description: str
     json_schema: dict[str, Any]  # OpenAI/MCP-compatible parameters schema
     side_effecting: bool = False  # if True, invocation routes through HITL approval
+    category: str = "general"  # grouping for the registry/Studio gallery
+    tags: list[str] = Field(default_factory=list)  # free-form labels for search/filter
     # Excluded from serialization; carries the actual callable.
     handler: Callable[..., Any] | None = Field(default=None, exclude=True)
 

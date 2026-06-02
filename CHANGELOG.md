@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-02
+
+### Added
+- **Enterprise connector catalog** (`tools/enterprise.py`): ~518 data-driven integration tool
+  specs (≈37 vendors × actions across CRM, ITSM, DevOps, SCM, cloud, storage, data, comms, docs,
+  HR, finance, support) — properly schema'd, categorized by domain, searchable, role-assignable.
+  Offline they are **deterministic stubs**; they become real when bound to an **MCP server**
+  (`register_mcp_tools`). **Opt-in** via `RIPTIDE_ENABLE_ENTERPRISE=1` (off by default). Read
+  actions are read-only/inline; write actions are `side_effecting` (HITL-gated, inert until bound).
+- **~70 more real stdlib utilities** in `tools/library.py` (string distance/LCS, validation &
+  format checks, more stats/math/finance, geo/haversine, color, datetime, encoding) — the default
+  registry now ships ~238 always-on tools (756 with the enterprise pack enabled).
+- **~100 more roles** in `swarm/role_library.py` — enterprise functions (sales, marketing,
+  support, HR, finance, legal, compliance, operations, IT, analytics) and industry verticals
+  (healthcare, fintech, insurance, retail, manufacturing, logistics, telecom, energy). ~219 total.
+- **AutoGen-Studio-style chat redesign**: a 3-pane layout — left **conversation list**
+  (new/switch/delete), center thread with an **empty-state + clickable sample prompts**, **agent
+  name + avatar attribution**, per-message **timestamps + copy**, a **Stop** button to cancel a
+  streaming run and **Regenerate**; cleaner modern styling.
+
 ## [0.7.0] - 2026-06-02
 
 ### Added

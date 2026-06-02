@@ -163,6 +163,21 @@ def run_tests(path: str = "") -> str:
     return _run(cmd)
 
 
+def run_node(code: str) -> str:
+    """Execute a JavaScript snippet with Node (cwd=workspace, timed out)."""
+    return _run(["node", "-e", code])
+
+
+def lint_python(path: str = ".") -> str:
+    """Lint workspace Python with ruff (cwd=workspace, timed out)."""
+    return _run([sys.executable, "-m", "ruff", "check", path or "."])
+
+
+def format_python(path: str = ".") -> str:
+    """Format workspace Python with ruff (cwd=workspace, timed out)."""
+    return _run([sys.executable, "-m", "ruff", "format", path or "."])
+
+
 # --- specs -------------------------------------------------------------------
 
 
@@ -249,6 +264,27 @@ EXEC_SPECS = [
         side_effecting=True,
         handler=run_tests,
     ),
+    ToolSpec(
+        name="run_node",
+        description="Execute a JavaScript snippet with Node (opt-in). Requires approval.",
+        json_schema=_obj(code={"type": "string"}),
+        side_effecting=True,
+        handler=run_node,
+    ),
+    ToolSpec(
+        name="lint_python",
+        description="Lint workspace Python with ruff (opt-in). Requires approval.",
+        json_schema=_obj(path={"type": "string", "_required": False}),
+        side_effecting=True,
+        handler=lint_python,
+    ),
+    ToolSpec(
+        name="format_python",
+        description="Format workspace Python with ruff (opt-in). Requires approval.",
+        json_schema=_obj(path={"type": "string", "_required": False}),
+        side_effecting=True,
+        handler=format_python,
+    ),
 ]
 
 
@@ -257,4 +293,6 @@ def dev_tool_specs() -> list[ToolSpec]:
     specs = [*READ_ONLY_SPECS, *MUTATING_SPECS]
     if os.getenv("RIPTIDE_ENABLE_EXEC") == "1":
         specs += EXEC_SPECS
+    for spec in specs:
+        spec.category = "code"
     return specs

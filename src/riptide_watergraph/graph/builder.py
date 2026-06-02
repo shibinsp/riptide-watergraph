@@ -53,6 +53,7 @@ def build_graph(
     max_steps: int = 1,
     vote_k: int = 1,
     final_schema: dict[str, Any] | None = None,
+    sampling: dict[str, Any] | None = None,
 ):
     """Build and compile the orchestrator-worker graph.
 
@@ -83,6 +84,7 @@ def build_graph(
         max_steps=max_steps,
         vote_k=vote_k,
         final_schema=final_schema,
+        sampling=sampling or {},
     )
 
     g: StateGraph = StateGraph(OrchestratorState)

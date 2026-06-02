@@ -217,6 +217,11 @@ def run_task(
 
         _record_usage(settings, tenant_id, task, state)
 
+    return _result_from_state(tenant_id, state)
+
+
+def _result_from_state(tenant_id: str, state: dict) -> RunResult:
+    """Build the structured RunResult from the graph's final state."""
     metrics = state.get("metrics") or {}
     decision = state.get("swarm_decision") or {}
     return RunResult(
@@ -240,6 +245,51 @@ def run_task(
         guard_violations_out=state.get("guard_violations_out") or [],
         clarifications=state.get("clarifications") or {},
     )
+
+
+def stream_task(
+    task: str,
+    *,
+    tenant_id: str | None = None,
+    offline: bool = True,
+    settings: Settings | None = None,
+):
+    """Run a task, yielding ``("node", name)`` per executed graph node then
+    ``("result", RunResult)``. Interrupts are auto-approved inline (headless)."""
+    settings = settings or get_settings()
+    tenant_id = tenant_id or settings.tenant_id
+    init_tracing(settings)
+    Path(settings.checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+    enforce_budget(settings, tenant_id)
+
+    comp = build_components(settings, tenant_id=tenant_id, offline=offline)
+    config = {"configurable": {"thread_id": str(uuid.uuid4())}}
+    with SqliteSaver.from_conn_string(settings.checkpoint_path) as cp:
+        graph = build_graph(
+            gateway=comp.gateway, registry=comp.registry, composer=comp.composer,
+            model=comp.model, checkpointer=cp, memory=comp.memory, reflector=comp.reflector,
+            guardrails=comp.guardrails, planner_model=comp.planner_model,
+            worker_model=comp.worker_model,
+        )
+        pending: Any = {"task": task, "session_id": config["configurable"]["thread_id"],
+                        "tenant_id": tenant_id}
+        for _ in range(50):  # bounded: re-stream after each auto-approved interrupt
+            for chunk in graph.stream(pending, config, stream_mode="updates"):
+                for node_name in chunk:
+                    if not node_name.startswith("__"):
+                        yield ("node", node_name)
+            state = graph.get_state(config)
+            if not state.next:  # graph finished (no pending node)
+                break
+            interrupts = getattr(state, "interrupts", None) or []
+            payload = interrupts[0].value if interrupts else {}
+            if isinstance(payload, dict) and payload.get("type") == "clarification":
+                pending = Command(resume={"answer": "(no clarification available; proceed)"})
+            else:
+                pending = Command(resume={"approved": True})
+        final = dict(graph.get_state(config).values)
+        _record_usage(settings, tenant_id, task, final)
+    yield ("result", _result_from_state(tenant_id, final))
 
 
 def _record_usage(settings: Settings, tenant_id: str, task: str, state: dict) -> None:

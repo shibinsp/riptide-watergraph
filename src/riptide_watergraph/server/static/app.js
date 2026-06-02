@@ -454,56 +454,78 @@ function turnDetails(t) {
   if (t.metrics && Object.keys(t.metrics).length) box.appendChild(card("Metrics", copyPre(t.metrics), false));
   return box;
 }
-function bubble(role, contentNode, meta) {
-  return el("div", { class: "msg " + role },
-    el("div", { class: "avatar" }, role === "user" ? "U" : "≈"),
-    el("div", { class: "msg-body" },
-      meta ? el("div", { class: "msg-meta" }, meta) : null, contentNode));
+const SAMPLE_PROMPTS = [
+  "What is 21 * 2, and explain it simply?",
+  "Search cats, count the words, and uppercase the title",
+  "Find and fix the bug in pkg/m.py",
+  "Write concise release notes for a 0.8.0 launch",
+  "Plan a 3-step research task on renewable energy",
+];
+const CHATS_KEY = "lws-chats";
+function loadChats() { try { return JSON.parse(localStorage.getItem(CHATS_KEY) || "[]"); } catch (e) { return []; } }
+function saveChats(list) { try { localStorage.setItem(CHATS_KEY, JSON.stringify(list)); } catch (e) { /* ignore */ } }
+function nowTime() { return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
+function initials(name) {
+  const parts = (name || "AI").replace(/[_-]/g, " ").split(/\s+/).filter(Boolean);
+  return ((parts[0] || "A")[0] + (parts[1] ? parts[1][0] : "")).toUpperCase();
+}
+
+function bubble(role, contentNode, opts) {
+  opts = opts || {};
+  const av = role === "user" ? "You" : (opts.agent || "AI");
+  const avatar = el("div", { class: "avatar" }, role === "user" ? "U" : initials(av));
+  const metaRow = el("div", { class: "msg-meta" },
+    el("span", null, role === "user" ? "You" : av),
+    opts.ts ? el("span", { class: "msg-ts" }, opts.ts) : null,
+    opts.copyText ? el("button", { class: "msg-copy", title: "copy",
+      onclick: () => { if (navigator.clipboard) navigator.clipboard.writeText(opts.copyText); toast("Copied", "ok"); } }, "copy") : null);
+  return el("div", { class: "msg " + role }, avatar,
+    el("div", { class: "msg-body" }, metaRow, contentNode));
 }
 
 VIEWS.chat = function () {
-  const settings = (function () {
-    const sid = el("input", { type: "text", id: "c-sid", value: "chat-1" });
-    const temp = el("input", { type: "range", id: "c-temp", min: "0", max: "2", step: "0.1", value: "0" });
-    const tempVal = el("span", { class: "muted" }, "0.0");
-    temp.oninput = () => { tempVal.textContent = parseFloat(temp.value).toFixed(1); };
-    const topp = el("input", { type: "number", id: "c-topp", class: "num", min: "0", max: "1", step: "0.05", placeholder: "—" });
-    const maxtok = el("input", { type: "number", id: "c-maxtok", class: "num", min: "1", placeholder: "—" });
-    const presetRow = el("div", { class: "segmented" },
-      ...Object.keys(PRESETS).map((name) => el("button", {
-        onclick: () => { temp.value = String(PRESETS[name]); temp.oninput(); },
-      }, name)));
-    const knob = (id, label, on) => switchEl(id, label, on);
-    return {
-      sid, temp, topp, maxtok,
-      node: el("div", null,
-        el("label", { class: "lbl" }, "Session"), sid,
-        el("label", { class: "lbl", style: "margin-top:14px" }, "Sampling"), presetRow,
-        el("div", { class: "row", style: "margin-top:10px; align-items:center" },
-          el("div", null, el("label", { class: "lbl" }, "Temperature"),
-            el("div", { style: "display:flex; gap:8px; align-items:center" }, temp, tempVal))),
-        el("div", { class: "row", style: "margin-top:10px" },
-          el("div", null, el("label", { class: "lbl" }, "top_p"), topp),
-          el("div", null, el("label", { class: "lbl" }, "max_tokens"), maxtok)),
-        el("label", { class: "lbl", style: "margin-top:14px" }, "Per-turn options"),
-        el("div", { class: "switches" },
-          knob("c-offline", "Offline", true), knob("c-memory", "Memory", false),
-          knob("c-guard", "Guardrails", true), knob("c-single", "Single", false),
-          knob("c-llm", "LLM composer", false), knob("c-critic", "Critic", false),
-          knob("c-super", "Supervisor", false)),
-        el("div", { class: "row", style: "margin-top:10px" },
-          el("div", null, el("label", { class: "lbl" }, "ReAct steps"),
-            el("input", { type: "number", id: "c-react", class: "num", min: "1", value: "1" })),
-          el("div", null, el("label", { class: "lbl" }, "Vote k"),
-            el("input", { type: "number", id: "c-vote", class: "num", min: "1", value: "1" })))),
-    };
-  })();
+  let activeES = null;
+  let lastTask = null;
+  const chats = loadChats();
+  if (!chats.length) chats.push({ id: "chat-1", title: "New chat" });
+  let activeId = chats[0].id;
+
+  // --- settings panel ---
+  const temp = el("input", { type: "range", id: "c-temp", min: "0", max: "2", step: "0.1", value: "0" });
+  const tempVal = el("span", { class: "muted" }, "0.0");
+  temp.oninput = () => { tempVal.textContent = parseFloat(temp.value).toFixed(1); };
+  const topp = el("input", { type: "number", id: "c-topp", class: "num", min: "0", max: "1", step: "0.05", placeholder: "—" });
+  const maxtok = el("input", { type: "number", id: "c-maxtok", class: "num", min: "1", placeholder: "—" });
+  const presetRow = el("div", { class: "segmented" },
+    ...Object.keys(PRESETS).map((name) => el("button", {
+      onclick: () => { temp.value = String(PRESETS[name]); temp.oninput(); } }, name)));
+  const knob = (id, label, on) => switchEl(id, label, on);
+  const settingsNode = el("div", null,
+    el("label", { class: "lbl" }, "Sampling"), presetRow,
+    el("div", { style: "margin-top:10px" }, el("label", { class: "lbl" }, "Temperature"),
+      el("div", { style: "display:flex; gap:8px; align-items:center" }, temp, tempVal)),
+    el("div", { class: "row", style: "margin-top:10px" },
+      el("div", null, el("label", { class: "lbl" }, "top_p"), topp),
+      el("div", null, el("label", { class: "lbl" }, "max_tokens"), maxtok)),
+    el("label", { class: "lbl", style: "margin-top:14px" }, "Per-turn options"),
+    el("div", { class: "switches" },
+      knob("c-offline", "Offline", true), knob("c-memory", "Memory", false),
+      knob("c-guard", "Guardrails", true), knob("c-single", "Single", false),
+      knob("c-llm", "LLM composer", false), knob("c-critic", "Critic", false),
+      knob("c-super", "Supervisor", false)),
+    el("div", { class: "row", style: "margin-top:10px" },
+      el("div", null, el("label", { class: "lbl" }, "ReAct steps"),
+        el("input", { type: "number", id: "c-react", class: "num", min: "1", value: "1" })),
+      el("div", null, el("label", { class: "lbl" }, "Vote k"),
+        el("input", { type: "number", id: "c-vote", class: "num", min: "1", value: "1" }))));
 
   const messages = el("div", { class: "chat-log", id: "chat-log" });
   const input = el("textarea", { id: "chat-input", class: "chat-input", placeholder: "Message the agents…  (Enter to send, Shift+Enter for newline)" });
   const sendBtn = el("button", { class: "btn primary" }, "Send");
+  const stopBtn = el("button", { class: "btn", onclick: () => stop() }, "Stop"); stopBtn.disabled = true;
+  const regenBtn = el("button", { class: "btn", onclick: () => { if (lastTask) { input.value = lastTask; send(); } } }, "Regenerate");
   const exportBtn = el("button", { class: "btn", onclick: () => exportChat() }, "Export");
-  const clearBtn = el("button", { class: "btn", onclick: () => clearChat() }, "Clear");
+  const sessionList = el("div", { class: "chat-sessions-list" });
 
   function num(id) { const v = document.getElementById(id).value; return v === "" ? null : v; }
   function params(task) {
@@ -513,12 +535,16 @@ VIEWS.chat = function () {
       critic: document.getElementById("c-critic").checked, supervisor: document.getElementById("c-super").checked,
       react_steps: parseInt(document.getElementById("c-react").value, 10) || 1,
       vote_k: parseInt(document.getElementById("c-vote").value, 10) || 1,
-      temperature: parseFloat(settings.temp.value) };
+      temperature: parseFloat(temp.value) };
     if (num("c-topp") != null) p.top_p = parseFloat(num("c-topp"));
     if (num("c-maxtok") != null) p.max_tokens = parseInt(num("c-maxtok"), 10);
     return p;
   }
-  function addAssistant(t) {
+  const agentLabel = (t) => {
+    const rs = Array.from(new Set(t.roles || [])).slice(0, 3);
+    return rs.length ? rs.join(", ") : "agent";
+  };
+  function addAssistant(t, ts) {
     const body = el("div", null, el("div", null, t.answer || "(none)"));
     const det = turnDetails(t);
     if (det.childNodes.length) {
@@ -527,62 +553,99 @@ VIEWS.chat = function () {
       det.style.display = "none";
       body.append(toggle, det);
     }
-    const meta = (t.mode ? t.mode : "") + (t.blocked ? " · blocked" : "");
-    messages.appendChild(bubble("agent", body, meta));
-    messages.scrollTop = messages.scrollHeight;
+    if (t.blocked) body.appendChild(el("div", { class: "badge bad", style: "margin-top:6px" }, "blocked"));
+    messages.appendChild(bubble("agent", body, { agent: agentLabel(t), ts: ts, copyText: t.answer || "" }));
+    autoscroll();
+  }
+  const autoscroll = () => { messages.scrollTop = messages.scrollHeight; };
+
+  function emptyState() {
+    const cards = SAMPLE_PROMPTS.map((p) => el("button", { class: "sample-prompt",
+      onclick: () => { input.value = p; send(); } }, p));
+    return el("div", { class: "chat-empty" },
+      el("div", { class: "chat-empty-logo" }, "≈"),
+      el("h2", null, "Start a conversation"),
+      el("div", { class: "muted" }, "Chat with the multi-agent graph. Try one of these:"),
+      el("div", { class: "sample-prompts" }, ...cards));
   }
   async function loadTranscript() {
     messages.innerHTML = "";
-    const data = await api("/sessions/" + encodeURIComponent(settings.sid.value));
-    if (!data.turns.length) { messages.appendChild(el("div", { class: "empty" }, "No messages yet — say hello.")); return; }
-    data.turns.forEach((t) => { messages.appendChild(bubble("user", el("div", null, t.task))); addAssistant(t); });
+    const data = await api("/sessions/" + encodeURIComponent(activeId));
+    if (!data.turns.length) { messages.appendChild(emptyState()); return; }
+    data.turns.forEach((t) => {
+      messages.appendChild(bubble("user", el("div", null, t.task)));
+      addAssistant(t, null);
+    });
   }
+  function stop() { if (activeES) { activeES.close(); activeES = null; } sendBtn.disabled = false; stopBtn.disabled = true; }
   function send() {
     const task = input.value.trim();
     if (!task) return;
-    input.value = "";
-    messages.appendChild(bubble("user", el("div", null, task)));
-    const thinking = el("div", null, el("span", { class: "spinner" }), el("span", { class: "pills", id: "think-steps" }));
-    const thinkBubble = bubble("agent", thinking, "thinking…");
-    messages.appendChild(thinkBubble);
-    messages.scrollTop = messages.scrollHeight;
-    sendBtn.disabled = true;
+    lastTask = task; input.value = "";
+    const es0 = messages.querySelector(".chat-empty"); if (es0) es0.remove();
+    messages.appendChild(bubble("user", el("div", null, task), { ts: nowTime() }));
+    const steps = el("span", { class: "pills" });
+    const thinking = el("div", null, el("span", { class: "spinner" }), steps);
+    const thinkBubble = bubble("agent", thinking, { agent: "thinking…" });
+    messages.appendChild(thinkBubble); autoscroll();
+    sendBtn.disabled = true; stopBtn.disabled = false;
     const qs = new URLSearchParams(params(task));
-    const es = new EventSource("/api/sessions/" + encodeURIComponent(settings.sid.value) + "/messages/stream?" + qs.toString());
+    const es = new EventSource("/api/sessions/" + encodeURIComponent(activeId) + "/messages/stream?" + qs.toString());
+    activeES = es;
     es.onmessage = (e) => {
       const m = JSON.parse(e.data);
-      if (m.event === "node") {
-        thinking.querySelector("#think-steps").appendChild(el("span", { class: "chip" }, m.name));
-      } else if (m.event === "result") {
-        es.close(); thinkBubble.remove(); addAssistant(m.result); sendBtn.disabled = false;
-      } else if (m.event === "error") {
-        es.close(); thinkBubble.remove(); messages.appendChild(bubble("agent", el("div", { class: "error" }, m.detail))); sendBtn.disabled = false;
-      }
+      if (m.event === "node") { steps.appendChild(el("span", { class: "chip" }, m.name)); autoscroll(); }
+      else if (m.event === "result") { es.close(); activeES = null; thinkBubble.remove(); addAssistant(m.result, nowTime()); sendBtn.disabled = false; stopBtn.disabled = true; }
+      else if (m.event === "error") { es.close(); activeES = null; thinkBubble.remove(); messages.appendChild(bubble("agent", el("div", { class: "error" }, [].concat(m.detail).join(", ")))); sendBtn.disabled = false; stopBtn.disabled = true; }
     };
-    es.onerror = () => { es.close(); sendBtn.disabled = false; };
+    es.onerror = () => { es.close(); activeES = null; sendBtn.disabled = false; stopBtn.disabled = true; };
   }
   sendBtn.onclick = send;
   input.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
 
   async function exportChat() {
-    const data = await api("/sessions/" + encodeURIComponent(settings.sid.value));
+    const data = await api("/sessions/" + encodeURIComponent(activeId));
     const md = data.turns.map((t) => "**You:** " + t.task + "\n\n**Agent:** " + (t.answer || "")).join("\n\n---\n\n");
     const blob = new Blob([md || "(empty)"], { type: "text/markdown" });
-    const a = el("a", { href: URL.createObjectURL(blob), download: settings.sid.value + ".md" });
-    a.click(); toast("Exported", "ok");
-  }
-  async function clearChat() {
-    await fetch("/sessions/" + encodeURIComponent(settings.sid.value), { method: "DELETE" });
-    await loadTranscript(); toast("Chat cleared", "ok");
+    const a = el("a", { href: URL.createObjectURL(blob), download: activeId + ".md" }); a.click();
+    toast("Exported", "ok");
   }
 
+  // --- conversation list ---
+  function renderSessions() {
+    sessionList.innerHTML = "";
+    loadChats().forEach((c) => {
+      const row = el("div", { class: "chat-session" + (c.id === activeId ? " active" : "") },
+        el("span", { class: "chat-session-title", onclick: () => { stop(); activeId = c.id; renderSessions(); loadTranscript(); } }, c.title || c.id),
+        el("button", { class: "chat-session-x", title: "delete", onclick: async (ev) => {
+          ev.stopPropagation();
+          await fetch("/sessions/" + encodeURIComponent(c.id), { method: "DELETE" });
+          let list = loadChats().filter((x) => x.id !== c.id);
+          if (!list.length) list = [{ id: "chat-1", title: "New chat" }];
+          saveChats(list);
+          if (activeId === c.id) activeId = list[0].id;
+          renderSessions(); loadTranscript();
+        } }, "×"));
+      sessionList.appendChild(row);
+    });
+  }
+  const newChatBtn = el("button", { class: "btn primary", style: "width:100%", onclick: () => {
+    const id = "chat-" + Date.now().toString(36);
+    const list = loadChats(); list.unshift({ id, title: "New chat" }); saveChats(list);
+    activeId = id; renderSessions(); loadTranscript(); input.focus();
+  } }, "+ New chat");
+
+  saveChats(chats);
+  renderSessions();
+
   view().append(viewHead("Chat", "Converse with the multi-agent graph; tune the model and per-turn options."),
-    el("div", { class: "chat-wrap" },
+    el("div", { class: "chat-grid" },
+      el("aside", { class: "chat-sessions" }, newChatBtn, sessionList),
       el("div", { class: "chat-main" }, messages,
         el("div", { class: "composer" }, input,
-          el("div", { class: "composer-actions" }, sendBtn, exportBtn, clearBtn))),
+          el("div", { class: "composer-actions" }, sendBtn, stopBtn, regenBtn, exportBtn))),
       el("aside", { class: "chat-settings" }, el("div", { class: "card" },
-        el("div", { class: "card-pad" }, el("h2", { style: "margin-top:0" }, "Settings"), settings.node)))));
+        el("div", { class: "card-pad" }, el("h2", { style: "margin-top:0" }, "Model & options"), settingsNode)))));
   loadTranscript();
 };
 

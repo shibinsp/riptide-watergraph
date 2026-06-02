@@ -12,6 +12,9 @@ Endpoints:
 - ``GET  /api/roles``                — the built-in agent roles.
 - ``POST /api/eval``                 — run the evaluation suite, return the report.
 - ``GET  /api/costs``                — per-tenant usage/cost dashboard.
+- ``GET  /api/connection``           — current AI connection (provider/model, masked key).
+- ``POST /api/connection``           — set the AI provider/model/key at runtime (in-memory).
+- ``POST /api/connection/test``      — ping the configured gateway to validate the connection.
 
 Endpoints are sync ``def`` on purpose: the graph runs synchronously (each node drives
 async work via ``asyncio.run``), so FastAPI executes them in its threadpool where a fresh
@@ -20,9 +23,13 @@ event loop is available. Over-budget tenants get HTTP 402.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import threading
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -31,14 +38,24 @@ from pydantic import BaseModel
 
 from ..config import get_settings
 from ..evaluation import EvalReport, EvalRunner
+from ..gateway import DemoGateway, LiteLLMGateway, ResilientGateway
+from ..interfaces.gateway import Message
 from ..observability.cost import BudgetExceeded, CostTracker, TenantTotals, _PRICE_PER_1K
 from ..service import RunResult, SessionStore, run_task
 from ..swarm.roles import DEFAULT_ROLES, AgentRole
 from ..tools import default_registry
 
-_VERSION = "0.3.0"
+_VERSION = "0.4.0"
 _STATIC = Path(__file__).parent / "static"
 _sessions = SessionStore()
+
+# --- runtime AI connection (in-memory; key never persisted to disk) ----------
+# Maps a provider to the env var litellm reads. Mirrored to os.environ on change so the
+# next run() picks it up (get_settings() is not cached; litellm reads keys per call).
+_PROVIDER_KEY_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
+                     "custom": "OPENAI_API_KEY"}
+_conn_lock = threading.Lock()
+_connection: dict[str, str] = {"provider": "offline", "model": "", "api_base": "", "api_key": ""}
 
 
 class RunRequest(BaseModel):
@@ -74,6 +91,29 @@ class ToolInfo(BaseModel):
     json_schema: dict[str, Any]
 
 
+class ConnectionRequest(BaseModel):
+    provider: Literal["offline", "openai", "anthropic", "custom"] = "offline"
+    model: str = ""
+    api_key: str | None = None  # omitted => keep the existing key
+    api_base: str | None = None
+
+
+class ConnectionStatus(BaseModel):
+    provider: str
+    model: str
+    api_base: str
+    key_set: bool
+    key_masked: str | None
+    configured: bool
+
+
+class ConnectionTestResult(BaseModel):
+    ok: bool
+    model: str
+    latency_ms: int
+    detail: str
+
+
 class MetaResponse(BaseModel):
     version: str
     defaults: dict[str, Any]
@@ -81,10 +121,41 @@ class MetaResponse(BaseModel):
     current_model: str
     tool_count: int
     role_names: list[str]
+    connection: ConnectionStatus
 
 
 def _sse(obj: dict) -> str:
     return f"data: {json.dumps(obj)}\n\n"
+
+
+def _mask(key: str) -> str | None:
+    """Mask an API key for display — never return the raw secret."""
+    if not key:
+        return None
+    return ("•" * 4) + key[-4:] if len(key) > 4 else "•" * len(key)
+
+
+def _connection_status() -> ConnectionStatus:
+    with _conn_lock:
+        c = dict(_connection)
+    key = c["api_key"]
+    return ConnectionStatus(
+        provider=c["provider"], model=c["model"], api_base=c["api_base"],
+        key_set=bool(key), key_masked=_mask(key),
+        configured=c["provider"] != "offline" and bool(c["model"]),
+    )
+
+
+def _apply_connection() -> None:
+    """Mirror the in-memory connection to os.environ so the next run/litellm call uses it."""
+    with _conn_lock:
+        c = dict(_connection)
+    if c["model"]:
+        os.environ["RIPTIDE_WATERGRAPH_MODEL"] = c["model"]
+    if c["provider"] in _PROVIDER_KEY_ENV and c["api_key"]:
+        os.environ[_PROVIDER_KEY_ENV[c["provider"]]] = c["api_key"]
+    if c["api_base"]:
+        os.environ["OPENAI_API_BASE"] = c["api_base"]
 
 
 def create_app() -> FastAPI:
@@ -171,6 +242,7 @@ def create_app() -> FastAPI:
             current_model=settings.riptide_watergraph_model,
             tool_count=len(default_registry().all_specs()),
             role_names=list(DEFAULT_ROLES),
+            connection=_connection_status(),
         )
 
     @app.get("/api/tools", response_model=list[ToolInfo])
@@ -188,6 +260,54 @@ def create_app() -> FastAPI:
     @app.get("/api/costs", response_model=dict[str, TenantTotals])
     def api_costs() -> dict[str, TenantTotals]:
         return CostTracker(get_settings().usage_log_path).by_tenant()
+
+    # --- AI connection (runtime, in-memory key; masked in responses) ---
+
+    @app.get("/api/connection", response_model=ConnectionStatus)
+    def api_get_connection() -> ConnectionStatus:
+        return _connection_status()
+
+    @app.post("/api/connection", response_model=ConnectionStatus)
+    def api_set_connection(req: ConnectionRequest) -> ConnectionStatus:
+        if req.provider != "offline" and not req.model:
+            raise HTTPException(status_code=400, detail="model is required")
+        if req.provider == "custom" and not (req.api_base or _connection["api_base"]):
+            raise HTTPException(status_code=400, detail="api_base is required for a custom provider")
+        with _conn_lock:
+            _connection["provider"] = req.provider
+            _connection["model"] = req.model
+            _connection["api_base"] = req.api_base if req.api_base is not None else (
+                _connection["api_base"] if req.provider == "custom" else "")
+            if req.api_key is not None:  # omitted => keep the existing key
+                _connection["api_key"] = req.api_key
+            if req.provider in ("openai", "anthropic", "custom") and not _connection["api_key"]:
+                raise HTTPException(status_code=400, detail="api_key is required for this provider")
+        _apply_connection()
+        return _connection_status()
+
+    @app.post("/api/connection/test", response_model=ConnectionTestResult)
+    def api_test_connection(req: ConnectionRequest) -> ConnectionTestResult:
+        offline = req.provider == "offline"
+        model = req.model or get_settings().riptide_watergraph_model
+        if not offline:
+            _apply_connection()  # ensure litellm sees the saved key/base
+        try:
+            if offline:
+                gateway: Any = DemoGateway()
+            else:
+                gateway = ResilientGateway(
+                    LiteLLMGateway(default_model=model), max_attempts=1, timeout_s=20.0)
+            start = time.perf_counter()
+            asyncio.run(gateway.complete(model=model, messages=[Message(role="user", content="ping")]))
+            latency = int((time.perf_counter() - start) * 1000)
+            return ConnectionTestResult(ok=True, model=model, latency_ms=latency,
+                                        detail="offline (DemoGateway)" if offline else "connected")
+        except ImportError:
+            return ConnectionTestResult(ok=False, model=model, latency_ms=0,
+                                        detail='litellm not installed — pip install -e ".[litellm]"')
+        except Exception as exc:  # noqa: BLE001 - report any failure, never crash
+            return ConnectionTestResult(ok=False, model=model, latency_ms=0,
+                                        detail=f"{type(exc).__name__}: {exc}")
 
     # --- Studio SPA (registered AFTER all routes so it never shadows them) ---
 

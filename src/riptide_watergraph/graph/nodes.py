@@ -18,6 +18,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+import jsonschema
 from langgraph.types import interrupt
 
 from ..guardrails.pipeline import GuardrailPipeline
@@ -52,6 +53,7 @@ class GraphContext:
     max_handoffs: int = 1  # per-subtask agent-to-agent handoff cap
     max_steps: int = 1  # ReAct think->act->observe steps per subtask (1 = single-shot)
     vote_k: int = 1  # self-consistency samples for direct answers (1 = no voting)
+    final_schema: dict[str, Any] | None = None  # JSON Schema for structured final output
 
     def __post_init__(self) -> None:
         # Per-role models default to the single configured model.
@@ -563,9 +565,55 @@ def make_finalize(ctx: GraphContext):
             )
             _add_usage(metrics, result)
             answer = (result.content or transcript) + note
-            return {"final_answer": answer, "metrics": metrics}
+
+            update: dict[str, Any] = {"final_answer": answer, "metrics": metrics}
+            if ctx.final_schema is not None:
+                structured = _structured_output(ctx, state, transcript, metrics)
+                if structured is not None:
+                    update["structured_output"] = structured
+            return update
 
     return finalize
+
+
+def _structured_output(
+    ctx: GraphContext, state: OrchestratorState, transcript: str, metrics: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Ask the model for a JSON object matching ``ctx.final_schema``; validate (retry once)."""
+    schema = ctx.final_schema or {}
+    sys = Message(
+        role="system",
+        content="Return ONLY a JSON object matching this JSON Schema, no prose: "
+        + json.dumps(schema),
+    )
+    usr = Message(role="user", content=f"Task: {state['task']}\n\nResults:\n{transcript}")
+    for _ in range(2):
+        res = _run(ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr]))
+        _add_usage(metrics, res)
+        data = _parse_json_object(res.content)
+        if data is not None:
+            try:
+                jsonschema.validate(instance=data, schema=schema)
+                return data
+            except jsonschema.ValidationError:
+                continue
+    return None
+
+
+def _parse_json_object(content: str | None) -> dict[str, Any] | None:
+    """Parse a JSON object from a model reply (tolerant of code fences)."""
+    if not content:
+        return None
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if "\n" in text:
+            text = text.split("\n", 1)[1]
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        return None
 
 
 def make_critic(ctx: GraphContext):

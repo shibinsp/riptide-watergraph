@@ -126,7 +126,7 @@ class WorkflowStore:
 
     def _path(self, name: str) -> Path:
         target = (self._dir / f"{_slug(name)}.json").resolve()
-        if self._dir.resolve() not in target.parents:
+        if self._dir.resolve() not in target.parents:  # pragma: no cover - _slug already neutralizes traversal
             raise WorkflowValidationError([f"unsafe workflow name: {name!r}"])
         return target
 

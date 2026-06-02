@@ -68,6 +68,12 @@ class UsageRecord(BaseModel):
     cost_usd: float = 0.0
     blocked: bool = False
     ts: float = 0.0
+    # --- monitoring fields (additive; default-safe) ---
+    latency_ms: int = 0  # end-to-end run duration
+    success: bool | None = None  # reflection outcome, when memory is on
+    tool_calls_total: int = 0
+    tool_calls_valid: int = 0
+    n_subtasks: int = 0  # plan size
 
 
 class TenantTotals(BaseModel):

@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-02
+
+### Added
+- **Agentic developer tools** for coding & bug-fixing, all confined to a **workspace sandbox**
+  (`Settings.workspace_dir`): `read_file`, `list_dir`, `find_files`, `search_code` (read-only),
+  `write_file`, `apply_edit` (side-effecting). Code-execution tools `run_python`, `run_command`,
+  `run_tests` are **opt-in** — registered only when `RIPTIDE_ENABLE_EXEC=1`.
+- A **`coder`** agent role (with the dev-tool allow-list); `role_for` now routes code/bug/fix/
+  refactor/debug subtasks to it.
+- **Studio Connections panel** + `GET/POST /api/connection` and `POST /api/connection/test`:
+  set the AI provider (OpenAI / Anthropic / Custom OpenAI-compatible) + model + API key at
+  runtime. The key is held **in memory only** (never written to disk) and **masked** in responses;
+  it is mirrored to the environment so the next run connects with no restart.
+- **Modern enterprise UI redesign** of the Studio: a design system with **light + dark themes**
+  (toggle persisted in `localStorage`), an app shell (top bar with connection-status pill,
+  grouped sidebar), toast notifications, toggle switches, segmented controls, and copy-to-clipboard
+  JSON — all still dependency-free vanilla JS/CSS.
+
+### Security
+- File tools reject `..`/absolute paths that escape the workspace sandbox; code-execution tools
+  are off by default. The Studio API is unauthenticated and binds `127.0.0.1` — do not expose it
+  publicly.
+
 ## [0.3.0] - 2026-06-02
 
 ### Added

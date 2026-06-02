@@ -12,6 +12,8 @@ const ICONS = {
   eval: "M9 11l3 3 8-8M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11",
   costs: "M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6",
   connections: "M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20M12 2a15 15 0 010 20 15 15 0 010-20z",
+  tool_runner: "M5 3l14 9-14 9V3zM19 3v18",
+  history: "M3 3v6h6M3 9a9 9 0 102.5-6.4L3 9M12 7v5l4 2",
   sun: "M12 17a5 5 0 100-10 5 5 0 000 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
   moon: "M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z",
   copy: "M9 9h10v10H9zM5 15H4V5h10v1",
@@ -93,10 +95,54 @@ function card(title, body, open = true) {
 }
 function panel(body) { return el("div", { class: "card" }, el("div", { class: "card-pad" }, body)); }
 
+// Searchable, category-filtered gallery: items[].category drives the chips; renderCard(item)
+// builds each card; matches(item, query) decides text search hits.
+function gallery(items, renderCard, matches) {
+  const wrap = el("div");
+  const grid = el("div", { class: "grid" });
+  const counter = el("span", { class: "muted" });
+  const cats = ["all", ...Array.from(new Set(items.map((i) => i.category))).sort()];
+  let activeCat = "all";
+  let query = "";
+  const search = el("input", { type: "text", placeholder: "Search…",
+    oninput: (e) => { query = e.target.value.toLowerCase(); render(); } });
+  const chipRow = el("div", { class: "segmented" });
+  function render() {
+    grid.innerHTML = "";
+    const shown = items.filter((i) =>
+      (activeCat === "all" || i.category === activeCat) && (!query || matches(i, query)));
+    shown.forEach((i) => grid.appendChild(renderCard(i)));
+    counter.textContent = `${shown.length} of ${items.length}`;
+    chipRow.querySelectorAll("button").forEach((b) =>
+      b.classList.toggle("active", b.dataset.cat === activeCat));
+  }
+  cats.forEach((cat) => {
+    const n = cat === "all" ? items.length : items.filter((i) => i.category === cat).length;
+    chipRow.appendChild(el("button", { "data-cat": cat,
+      onclick: () => { activeCat = cat; render(); } }, `${cat} (${n})`));
+  });
+  wrap.append(
+    el("div", { class: "filterbar" },
+      el("div", { style: "display:flex; gap:10px; align-items:center; flex-wrap:wrap" }, search, counter),
+      chipRow),
+    grid);
+  render();
+  return wrap;
+}
+
+// ---------- run history (localStorage) ----------
+const HKEY = "lws-history";
+function loadHistory() { try { return JSON.parse(localStorage.getItem(HKEY) || "[]"); } catch (e) { return []; } }
+function saveHistory(entry) {
+  const h = loadHistory();
+  h.unshift(entry);
+  try { localStorage.setItem(HKEY, JSON.stringify(h.slice(0, 50))); } catch (e) { /* ignore */ }
+}
+
 // ---------- nav + router ----------
 const NAV = [
-  { group: "Workspace", items: [["playground", "Playground"], ["sessions", "Sessions"]] },
-  { group: "Library", items: [["tools", "Tools"], ["roles", "Roles"]] },
+  { group: "Workspace", items: [["playground", "Playground"], ["sessions", "Sessions"], ["history", "History"]] },
+  { group: "Library", items: [["tools", "Tools"], ["roles", "Roles"], ["tool_runner", "Tool Runner"]] },
   { group: "Insights", items: [["eval", "Eval"], ["costs", "Costs"]] },
   { group: "System", items: [["connections", "Connections"]] },
 ];
@@ -127,11 +173,36 @@ function renderConnPill(conn) {
   label.textContent = live ? (conn.provider + " · " + conn.model) : "Offline";
 }
 
+// Live-trace run: stream nodes from the SSE endpoint, then render the inspector.
+function runTrace(body, out, record, done) {
+  out.innerHTML = "";
+  const steps = el("div", { class: "pills" });
+  out.appendChild(panel(el("div", null, el("label", { class: "lbl" }, "Execution trace"),
+    el("div", null, el("span", { class: "spinner" }), "streaming…"), steps)));
+  const qs = new URLSearchParams({ task: body.task, tenant_id: body.tenant_id, offline: "true" });
+  const es = new EventSource("/api/run/trace?" + qs.toString());
+  es.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.event === "node") {
+      steps.appendChild(el("span", { class: "chip" }, msg.name));
+    } else if (msg.event === "result") {
+      es.close();
+      out.innerHTML = ""; out.appendChild(renderInspector(msg.result)); record(msg.result); done();
+    } else if (msg.event === "error") {
+      es.close(); out.innerHTML = ""; out.appendChild(panel(el("div", { class: "banner bad" }, msg.detail))); done();
+    }
+  };
+  es.onerror = () => { es.close(); done(); };
+}
+
 // =================== Playground ===================
 VIEWS.playground = function () {
   const d = (META && META.defaults) || {};
   const connLive = META && META.connection && META.connection.configured;
+  let replay = null;
+  try { replay = JSON.parse(sessionStorage.getItem("lws-replay") || "null"); sessionStorage.removeItem("lws-replay"); } catch (e) { /* ignore */ }
   const task = el("textarea", { id: "pg-task", placeholder: "Describe a task — e.g. 'find and fix the bug in pkg/m.py' or 'search cats and count the words'" });
+  if (replay && replay.task) task.value = replay.task;
   const tenant = el("input", { type: "text", id: "pg-tenant", value: d.tenant_id || "default" });
   const schema = el("textarea", { id: "pg-schema", placeholder: '{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}' });
   const schemaErr = el("div", { class: "banner bad", id: "pg-schema-err" }); schemaErr.style.display = "none";
@@ -163,11 +234,18 @@ VIEWS.playground = function () {
     };
     runBtn.disabled = true;
     out.innerHTML = "";
+    const record = (result) => saveHistory({ task: body.task, mode: result.mode,
+      final_answer: result.final_answer, when: new Date().toISOString().slice(0, 19).replace("T", " ") });
+    if (document.getElementById("pg-trace").checked) {
+      runTrace(body, out, record, () => { runBtn.disabled = false; });
+      return;
+    }
     out.appendChild(el("div", { class: "card" }, el("div", { class: "card-pad" },
       el("span", { class: "spinner" }), "Running…")));
     try {
       const result = await jpost("/run", body);
       out.innerHTML = ""; out.appendChild(renderInspector(result));
+      record(result);
     } catch (e) {
       out.innerHTML = ""; out.appendChild(panel(el("div", { class: "banner bad" }, "Run failed: " + e.message)));
       toast("Run failed", "bad");
@@ -191,7 +269,10 @@ VIEWS.playground = function () {
           switchEl("pg-memory", "Memory", d.memory),
           switchEl("pg-guard", "Guardrails", d.guardrails),
           switchEl("pg-critic", "Critic", d.critic),
-          switchEl("pg-super", "Supervisor", d.supervisor)),
+          switchEl("pg-super", "Supervisor", d.supervisor),
+          switchEl("pg-trace", "Live trace", false)),
+        el("div", { class: "hint" },
+          "Live trace streams node-by-node execution (offline, default options)."),
         card("Advanced", el("div", null,
           el("div", { class: "row" }, numField("pg-react", "ReAct steps", d.react_steps || 1),
             numField("pg-vote", "Vote k", d.vote_k || 1)),
@@ -375,30 +456,107 @@ VIEWS.sessions = function () {
 
 // =================== Tools ===================
 VIEWS.tools = async function () {
-  view().append(viewHead("Tools", "Registered tools the agents can call — including the agentic developer toolset."));
-  const grid = el("div", { class: "grid" }); view().appendChild(grid);
+  view().append(viewHead("Tools",
+    "Registered tools the agents can call — search and filter by category."));
   const tools = await api("/api/tools");
-  tools.forEach((t) => grid.appendChild(el("div", { class: "card" }, el("div", { class: "card-pad" },
-    el("div", { class: "kv" }, el("strong", null, t.name), el("span", { class: "chip" }, "v" + t.version),
+  const renderCard = (t) => el("div", { class: "card" }, el("div", { class: "card-pad" },
+    el("div", { class: "kv" }, el("strong", null, t.name), el("span", { class: "chip" }, t.category),
       el("span", { class: t.side_effecting ? "badge warn" : "badge ok" }, t.side_effecting ? "side-effecting" : "read-only")),
     el("div", { class: "muted" }, t.description),
-    card("schema", copyPre(t.json_schema), false)))));
-  view().appendChild(el("div", { class: "hint", style: "max-width:980px" },
-    "File tools are confined to the workspace sandbox. run_python / run_command / run_tests appear only when the server runs with RIPTIDE_ENABLE_EXEC=1."));
+    card("schema", copyPre(t.json_schema), false)));
+  const matches = (t, q) => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q);
+  view().appendChild(gallery(tools, renderCard, matches));
 };
 
 // =================== Roles ===================
 VIEWS.roles = async function () {
-  view().append(viewHead("Roles", "Built-in specialist agents and their tool allow-lists."));
-  const grid = el("div", { class: "grid" }); view().appendChild(grid);
+  view().append(viewHead("Roles", "Specialist agents and their tool allow-lists — search and filter by category."));
   const roles = await api("/api/roles");
-  roles.forEach((r) => {
-    const chips = r.tools == null ? [el("span", { class: "chip" }, "all tools")] : r.tools.map((t) => el("span", { class: "chip" }, t));
-    grid.appendChild(el("div", { class: "card" }, el("div", { class: "card-pad" },
-      el("div", { class: "kv" }, el("strong", null, r.name)),
-      el("div", { class: "pills" }, ...chips),
-      el("div", { class: "muted", style: "margin-top:8px; white-space:pre-wrap" }, r.system_prompt))));
+  const renderCard = (r) => {
+    const tools = r.tools == null ? [] : r.tools;
+    const shown = tools.slice(0, 8).map((t) => el("span", { class: "chip" }, t));
+    const more = tools.length > 8 ? [el("span", { class: "chip" }, "+" + (tools.length - 8))] : [];
+    const chips = r.tools == null ? [el("span", { class: "chip" }, "all tools")] : [...shown, ...more];
+    return el("div", { class: "card" }, el("div", { class: "card-pad" },
+      el("div", { class: "kv" }, el("strong", null, r.name), el("span", { class: "chip" }, r.category)),
+      el("div", { class: "muted", style: "margin-bottom:8px" }, r.description || ""),
+      el("div", { class: "pills" }, ...chips)));
+  };
+  const matches = (r, q) =>
+    r.name.toLowerCase().includes(q) || (r.description || "").toLowerCase().includes(q);
+  view().appendChild(gallery(roles, renderCard, matches));
+};
+
+// =================== Tool Runner ===================
+VIEWS.tool_runner = async function () {
+  view().append(viewHead("Tool Runner", "Invoke a single read-only tool directly to explore the toolset."));
+  const tools = (await api("/api/tools")).filter((t) => !t.side_effecting);
+  const dl = el("datalist", { id: "tool-list" }, ...tools.map((t) => el("option", { value: t.name })));
+  const pick = el("input", { type: "text", list: "tool-list", placeholder: "tool name, e.g. sha256" });
+  const form = el("div", { id: "tr-form" });
+  const out = el("div", { id: "tr-out", class: "stack" });
+  const runBtn = el("button", { class: "btn primary" }, "Run tool");
+
+  function buildForm() {
+    form.innerHTML = "";
+    const t = tools.find((x) => x.name === pick.value);
+    if (!t) { form.appendChild(el("div", { class: "hint" }, "Pick a read-only tool to see its inputs.")); return; }
+    form.appendChild(el("div", { class: "muted", style: "margin-bottom:8px" }, t.description));
+    const props = (t.json_schema && t.json_schema.properties) || {};
+    Object.keys(props).forEach((key) => {
+      const ty = (props[key].type) || "string";
+      form.appendChild(el("div", { class: "field", style: "margin-bottom:10px" },
+        el("label", { class: "lbl" }, key + " (" + ty + ")"),
+        el("input", { type: ty === "integer" || ty === "number" ? "number" : "text",
+          "data-key": key, "data-type": ty, class: "tr-arg" })));
+    });
+  }
+  pick.oninput = buildForm;
+  runBtn.onclick = async () => {
+    const t = tools.find((x) => x.name === pick.value);
+    if (!t) { toast("Pick a tool first", "bad"); return; }
+    const args = {};
+    form.querySelectorAll(".tr-arg").forEach((inp) => {
+      const v = inp.value; if (v === "") return;
+      const ty = inp.dataset.type;
+      args[inp.dataset.key] = ty === "integer" ? parseInt(v, 10)
+        : ty === "number" ? parseFloat(v)
+        : ty === "array" ? JSON.parse(v) : v;
+    });
+    runBtn.disabled = true;
+    try {
+      const r = await jpost("/api/tools/" + encodeURIComponent(t.name) + "/invoke", { arguments: args });
+      out.innerHTML = ""; out.appendChild(panel(el("div", null, el("label", { class: "lbl" }, "Result"), copyPre(r.result))));
+    } catch (e) { toast(e.message, "bad"); } finally { runBtn.disabled = false; }
+  };
+  buildForm();
+  view().append(el("div", { class: "stack" },
+    panel(el("div", null, el("label", { class: "lbl" }, "Tool"), pick, dl,
+      el("div", { style: "margin-top:12px" }, form),
+      el("div", { class: "btn-row" }, runBtn))), out));
+};
+
+// =================== History ===================
+VIEWS.history = function () {
+  view().append(viewHead("History", "Your recent runs (stored locally in this browser)."));
+  const h = loadHistory();
+  if (!h.length) { view().appendChild(el("div", { class: "empty" }, "No runs yet. Run a task in the Playground.")); return; }
+  const clearBtn = el("button", { class: "btn", onclick: () => {
+    try { localStorage.removeItem(HKEY); } catch (e) { /* ignore */ } show("history");
+  } }, "Clear history");
+  const stack = el("div", { class: "stack" }, el("div", { class: "btn-row" }, clearBtn));
+  h.forEach((entry) => {
+    const replay = el("button", { class: "btn", onclick: () => {
+      sessionStorage.setItem("lws-replay", JSON.stringify(entry)); show("playground");
+    } }, "Replay");
+    stack.appendChild(panel(el("div", null,
+      el("div", { class: "kv" },
+        el("span", { class: "badge accent" }, entry.mode || "single"),
+        el("span", { class: "muted" }, entry.when || ""), replay),
+      el("div", null, el("strong", null, "Task: "), entry.task),
+      el("div", { class: "muted", style: "margin-top:4px" }, (entry.final_answer || "").slice(0, 240)))));
   });
+  view().appendChild(stack);
 };
 
 // =================== Eval ===================

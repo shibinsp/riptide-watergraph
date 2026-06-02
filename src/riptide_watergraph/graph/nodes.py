@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import jsonschema
@@ -54,6 +54,7 @@ class GraphContext:
     max_steps: int = 1  # ReAct think->act->observe steps per subtask (1 = single-shot)
     vote_k: int = 1  # self-consistency samples for direct answers (1 = no voting)
     final_schema: dict[str, Any] | None = None  # JSON Schema for structured final output
+    sampling: dict[str, Any] = field(default_factory=dict)  # temperature/top_p/max_tokens etc.
 
     def __post_init__(self) -> None:
         # Per-role models default to the single configured model.
@@ -272,7 +273,7 @@ def make_orchestrator(ctx: GraphContext):
                 )
                 usr = Message(role="user", content=task)
                 result = _run(
-                    ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr])
+                    ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr], **ctx.sampling)
                 )
                 _add_usage(metrics, result)
                 plan = _coerce_plan(result.content, task)
@@ -335,7 +336,8 @@ def make_worker(ctx: GraphContext):
                 samples = []
                 for _ in range(ctx.vote_k):
                     s = _run(ctx.gateway.complete(
-                        model=ctx.worker_model, messages=messages, tools=tools))
+                        model=ctx.worker_model, messages=messages, tools=tools,
+                        **{**ctx.sampling, "temperature": ctx.sampling.get("temperature", 0.7)}))
                     _add_usage(metrics, s)
                     samples.append(s)
                 if all(not s.tool_calls for s in samples):
@@ -351,7 +353,8 @@ def make_worker(ctx: GraphContext):
             for step in range(ctx.max_steps):
                 result = _run(
                     ctx.gateway.complete(
-                        model=ctx.worker_model, messages=messages, tools=tools
+                        model=ctx.worker_model, messages=messages, tools=tools,
+                        **ctx.sampling,
                     )
                 )
                 _add_usage(metrics, result)
@@ -473,7 +476,7 @@ def make_swarm_worker(ctx: GraphContext):
             specs = await ctx.registry.retrieve(plan[idx], k=ctx.tool_k, allowed=allowed)
             tools = [s.to_openai_schema() for s in specs]
             result = await ctx.gateway.complete(
-                model=ctx.worker_model, messages=[sys, usr], tools=tools
+                model=ctx.worker_model, messages=[sys, usr], tools=tools, **ctx.sampling
             )
             return idx, result
 
@@ -614,7 +617,7 @@ def make_finalize(ctx: GraphContext):
                 content=f"Task: {state['task']}\n\nResults:\n{transcript}{note}",
             )
             result = _run(
-                ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr])
+                ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr], **ctx.sampling)
             )
             _add_usage(metrics, result)
             answer = (result.content or transcript) + note
@@ -641,7 +644,7 @@ def _structured_output(
     )
     usr = Message(role="user", content=f"Task: {state['task']}\n\nResults:\n{transcript}")
     for _ in range(2):
-        res = _run(ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr]))
+        res = _run(ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr], **ctx.sampling))
         _add_usage(metrics, res)
         data = _parse_json_object(res.content)
         if data is not None:
@@ -691,7 +694,7 @@ def make_critic(ctx: GraphContext):
                     role="user",
                     content=f"Subtask: {r['subtask']}\nResult: {r['output']}",
                 )
-                res = _run(ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr]))
+                res = _run(ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr], **ctx.sampling))
                 _add_usage(metrics, res)
                 verdicts.append(_parse_verdict(res.content, r))
         return {"verdicts": verdicts, "metrics": metrics}
@@ -745,7 +748,7 @@ def make_supervisor(ctx: GraphContext):
                 content="Failed: "
                 + "; ".join(f"{v['subtask']} ({v.get('reason', '')})" for v in failed),
             )
-            res = _run(ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr]))
+            res = _run(ctx.gateway.complete(model=ctx.planner_model, messages=[sys, usr], **ctx.sampling))
             _add_usage(metrics, res)
             corrective = _parse_subtasks(res.content)
             if not corrective:

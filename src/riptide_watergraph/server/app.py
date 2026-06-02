@@ -58,7 +58,7 @@ from ..tools import default_registry
 from ..tools.registry import ToolValidationError
 from ..workflows import WorkflowSpec, WorkflowStore, WorkflowValidationError, validate_spec
 
-_VERSION = "0.8.0"
+_VERSION = "0.9.0"
 _STATIC = Path(__file__).parent / "static"
 _sessions = SessionStore()
 _workflows = WorkflowStore()
@@ -122,6 +122,14 @@ class MessageRequest(BaseModel):
 
 class EvalRequest(BaseModel):
     offline: bool = True
+
+
+class MonitoringResponse(BaseModel):
+    totals: dict[str, Any]
+    by_mode: dict[str, int]
+    by_tenant: dict[str, TenantTotals]
+    daily: list[dict[str, Any]]
+    recent: list[dict[str, Any]]
 
 
 class WorkflowRunRequest(BaseModel):
@@ -399,6 +407,45 @@ def create_app() -> FastAPI:
     @app.get("/api/costs", response_model=dict[str, TenantTotals])
     def api_costs() -> dict[str, TenantTotals]:
         return CostTracker(get_settings().usage_log_path).by_tenant()
+
+    @app.get("/api/monitoring", response_model=MonitoringResponse)
+    def api_monitoring() -> MonitoringResponse:
+        tracker = CostTracker(get_settings().usage_log_path)
+        records = tracker.load()
+        n = len(records)
+        runs_with_success = [r for r in records if r.success is not None]
+        latencies = [r.latency_ms for r in records if r.latency_ms]
+        tc_total = sum(r.tool_calls_total for r in records)
+        tc_valid = sum(r.tool_calls_valid for r in records)
+        totals = {
+            "runs": n,
+            "blocked": sum(1 for r in records if r.blocked),
+            "success_rate": round(
+                sum(1 for r in runs_with_success if r.success) / len(runs_with_success), 4
+            ) if runs_with_success else None,
+            "avg_latency_ms": int(sum(latencies) / len(latencies)) if latencies else 0,
+            "total_tokens": sum(r.actual_tokens or r.est_tokens for r in records),
+            "total_cost_usd": round(sum(r.cost_usd for r in records), 6),
+            "tool_valid_rate": round(tc_valid / tc_total, 4) if tc_total else None,
+        }
+        by_mode: dict[str, int] = {}
+        daily_map: dict[str, dict[str, float]] = {}
+        for r in records:
+            by_mode[r.mode] = by_mode.get(r.mode, 0) + 1
+            day = time.strftime("%Y-%m-%d", time.gmtime(r.ts)) if r.ts else "unknown"
+            d = daily_map.setdefault(day, {"runs": 0, "cost_usd": 0.0, "tokens": 0})
+            d["runs"] += 1
+            d["cost_usd"] = round(d["cost_usd"] + r.cost_usd, 6)
+            d["tokens"] += r.actual_tokens or r.est_tokens
+        daily = [{"date": k, **v} for k, v in sorted(daily_map.items())]
+        recent = [
+            {"ts": r.ts, "task": r.task[:80], "mode": r.mode, "latency_ms": r.latency_ms,
+             "tokens": r.actual_tokens or r.est_tokens, "cost_usd": r.cost_usd,
+             "success": r.success, "blocked": r.blocked}
+            for r in records[-25:][::-1]
+        ]
+        return MonitoringResponse(totals=totals, by_mode=by_mode,
+                                  by_tenant=tracker.by_tenant(), daily=daily, recent=recent)
 
     # --- AI connection (runtime, in-memory key; masked in responses) ---
 

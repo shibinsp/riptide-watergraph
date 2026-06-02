@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "riptide-watergraph"
-version = "0.2.0"
+version = "0.3.0"
 description = "Riptide-Watergraph - a reusable, 'like water' multi-agent framework built as a thin layer on LangGraph."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -63,7 +63,7 @@ riptide = "riptide_watergraph.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-riptide_watergraph = ["py.typed"]
+riptide_watergraph = ["py.typed", "server/static/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

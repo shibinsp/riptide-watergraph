@@ -124,29 +124,51 @@ The image installs the `[server]` extra and runs `riptide serve` (uvicorn) on po
 ## Like Water Studio (web UI)
 
 `riptide serve` also serves a **dependency-free web studio** (an AutoGen-Studio-style UI,
-vanilla JS — no Node/build step) at the server root:
+vanilla JS — no Node/build step) at the server root, with a **modern enterprise design** and a
+**light/dark theme** toggle:
 
 ```bash
 pip install -e ".[server]"
 riptide serve --port 8000          # then open http://127.0.0.1:8000/
 ```
 
-Six views:
+Views:
 
 - **Playground** — enter a task and toggle every knob (offline, single/swarm, LLM composer,
   memory, guardrails, **critic**, **supervisor**, **ReAct steps**, **vote k**, tenant, and an
   optional structured-output JSON Schema), run it, and read a full **inspector**: plan +
   roles, swarm decision, per-subtask results with tool calls, critic verdicts, structured
   output, recalled/stored lessons, metrics, and guardrail violations.
+- **Connections** — set the AI provider (**OpenAI / Anthropic / Custom** OpenAI-compatible base
+  URL), model, and API key **at runtime**, with a **Test connection** button. The key is held in
+  server **memory only** (never written to disk) and shown **masked**; it is mirrored to the
+  environment so the next run connects with no restart.
 - **Sessions** — multi-turn conversations (each turn sees prior answers).
-- **Tools** / **Roles** — browse the registered tool catalog and the built-in agent roles.
-- **Eval** — run the offline behavioral suite and view the report.
-- **Costs** — the per-tenant usage/spend dashboard.
+- **Tools** / **Roles** — browse the tool catalog (incl. the agentic developer tools) and the
+  built-in agent roles.
+- **Eval** / **Costs** — run the offline suite; view per-tenant usage/spend.
 
-It is backed by read-only JSON endpoints — `GET /api/meta`, `/api/tools`, `/api/roles`,
-`/api/costs`, and `POST /api/eval` — alongside the existing `/run`, `/run/stream`, and
-`/sessions/*`. HITL is **auto-approve** in the Studio (headless); use the CLI for interactive
-approval/clarification prompts.
+Backed by JSON endpoints — `GET /api/meta`, `/api/tools`, `/api/roles`, `/api/costs`,
+`POST /api/eval`, and `GET/POST /api/connection` (+ `/api/connection/test`) — alongside `/run`,
+`/run/stream`, and `/sessions/*`. HITL is **auto-approve** in the Studio (headless); use the CLI
+for interactive approval/clarification prompts.
+
+**Security:** the Studio API is unauthenticated and the server binds `127.0.0.1` by default —
+do not expose it publicly. The API key stays in memory and masked. Code-execution tools are off
+unless you start the server with `RIPTIDE_ENABLE_EXEC=1`.
+
+### Agentic developer tools
+
+For coding & bug-fixing, the registry ships tools confined to a **workspace sandbox**
+(`workspace_dir`, default `.riptide_watergraph/workspace`): `read_file`, `list_dir`,
+`find_files`, `search_code` (read-only) and `write_file`, `apply_edit` (mutating, approval-gated).
+A `coder` role uses them, and coding subtasks route to it automatically. Code execution
+(`run_python`, `run_command`, `run_tests`) is **opt-in** and registered only when the server is
+started with `RIPTIDE_ENABLE_EXEC=1` (each runs in the sandbox with a timeout):
+
+```bash
+RIPTIDE_ENABLE_EXEC=1 riptide serve
+```
 
 ## Repository layout
 

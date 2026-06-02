@@ -10,7 +10,7 @@ from riptide_watergraph.observability.cost import (
     CostTracker,
     UsageRecord,
 )
-from riptide_watergraph.service import SessionStore, enforce_budget, run_task
+from riptide_watergraph.service import RunResult, SessionStore, enforce_budget, run_task
 
 
 def _settings(tmp_path, **over) -> Settings:
@@ -58,8 +58,10 @@ def test_run_task_refused_over_budget(tmp_path):
 
 def test_session_store_history():
     store = SessionStore()
-    store.append("s1", "first", "answer-one")
-    store.append("s1", "second", "answer-two")
+    store.append("s1", "first", RunResult(tenant_id="t", final_answer="answer-one"))
+    store.append("s1", "second", RunResult(tenant_id="t", final_answer="answer-two"))
     assert store.history("s1") == ["answer-one", "answer-two"]
     assert len(store.turns("s1")) == 2
     assert store.history("unknown") == []
+    store.clear("s1")
+    assert store.turns("s1") == []

@@ -167,13 +167,51 @@ ALL_SPECS = [
 ]
 
 
+# --- dynamic specs (registered at runtime, e.g. tools discovered from an MCP server) ---
+# ``default_registry()`` rebuilds a fresh registry on every run, so a tool registered at
+# runtime would be lost on the next run. Keeping it here — and appending it in
+# ``default_registry()`` — makes it persist into every subsequent run / eval / HTTP request.
+_DYNAMIC_SPECS: dict[str, ToolSpec] = {}
+
+
+def register_dynamic_spec(spec: ToolSpec) -> None:
+    """Add (or replace) a spec that persists across ``default_registry()`` calls."""
+    _DYNAMIC_SPECS[spec.name] = spec
+
+
+def remove_dynamic_specs(names: list[str]) -> list[str]:
+    """Drop the named dynamic specs. Returns the names that were actually removed."""
+    removed = []
+    for name in names:
+        if _DYNAMIC_SPECS.pop(name, None) is not None:
+            removed.append(name)
+    return removed
+
+
+def clear_dynamic_specs() -> None:
+    """Remove all dynamic specs (handy for test isolation)."""
+    _DYNAMIC_SPECS.clear()
+
+
+def dynamic_specs() -> list[ToolSpec]:
+    """The currently-registered dynamic specs."""
+    return list(_DYNAMIC_SPECS.values())
+
+
 def default_registry() -> StaticToolRegistry:
     """A registry preloaded with the example + agentic developer tools.
 
     Includes the workspace-confined dev tools (read/write/edit/search); code-execution
     tools are added only when ``RIPTIDE_ENABLE_EXEC=1`` (see ``tools/dev_tools.py``).
+    Any runtime-registered dynamic specs (e.g. MCP-server tools) are appended last.
     """
     reg = StaticToolRegistry()
-    for spec in [*ALL_SPECS, *dev_tool_specs(), *library_specs(), *enterprise_specs()]:
+    for spec in [
+        *ALL_SPECS,
+        *dev_tool_specs(),
+        *library_specs(),
+        *enterprise_specs(),
+        *_DYNAMIC_SPECS.values(),
+    ]:
         reg.register(spec)
     return reg

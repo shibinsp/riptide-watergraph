@@ -19,6 +19,7 @@ from .nodes import (
     make_guard_input,
     make_guard_output,
     make_human_approval,
+    make_human_clarify,
     make_orchestrator,
     make_recall,
     make_reflect,
@@ -89,6 +90,7 @@ def build_graph(
     g.add_node("worker", make_worker(ctx))
     g.add_node("swarm_worker", make_swarm_worker(ctx))
     g.add_node("human_approval", make_human_approval(ctx))
+    g.add_node("human_clarify", make_human_clarify(ctx))
     g.add_node("finalize", make_finalize(ctx))
 
     if memory is not None:
@@ -111,11 +113,13 @@ def build_graph(
         route_after_worker,
         {
             "human_approval": "human_approval",
+            "human_clarify": "human_clarify",
             "worker": "worker",
             "finalize": worker_exit,
         },
     )
     g.add_edge("human_approval", "worker")
+    g.add_edge("human_clarify", "worker")
     g.add_edge("swarm_worker", worker_exit)
 
     if enable_critic:

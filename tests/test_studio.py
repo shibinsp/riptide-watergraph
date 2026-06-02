@@ -34,26 +34,31 @@ def test_static_assets_served(client):
 
 def test_api_meta(client):
     m = client.get("/api/meta").json()
-    assert m["tool_count"] == 12  # 6 examples + 6 agentic dev tools (exec off)
-    assert len(m["role_names"]) == 5
+    assert m["tool_count"] >= 100  # examples + dev tools + the stdlib library packs
+    assert m["role_count"] >= 100
+    assert m["tool_categories"] and m["role_categories"]
     assert m["models"]  # non-empty
     assert "react_steps" in m["defaults"]
     assert m["connection"]["provider"] == "offline"
 
 
-def test_api_tools_returns_twelve(client):
+def test_api_tools_returns_catalog(client):
     tools = client.get("/api/tools").json()
-    assert len(tools) == 12
+    assert len(tools) >= 100
     names = {t["name"] for t in tools}
-    assert {"read_file", "write_file", "apply_edit", "search_code"} <= names
+    assert {"read_file", "write_file", "apply_edit", "search_code", "sha256", "base64_encode"} <= names
     for t in tools:
-        assert set(t) == {"name", "version", "description", "side_effecting", "json_schema"}
+        assert {"name", "version", "description", "side_effecting", "category", "tags",
+                "json_schema"} == set(t)
         assert "handler" not in t
 
 
-def test_api_roles_includes_coder(client):
+def test_api_roles_includes_core_and_specialists(client):
     roles = client.get("/api/roles").json()
-    assert {r["name"] for r in roles} == {"generalist", "researcher", "analyst", "scribe", "coder"}
+    names = {r["name"] for r in roles}
+    assert {"generalist", "researcher", "analyst", "scribe", "coder"} <= names
+    assert len(names) >= 100
+    assert all("category" in r and "description" in r for r in roles)
 
 
 def test_api_eval_offline_pass_rate(client):

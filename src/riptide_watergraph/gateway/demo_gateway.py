@@ -57,6 +57,10 @@ class DemoGateway(ModelGateway):
                 return CompletionResult(content=f"(offline) done; tool result: {observation}")
             return self._worker(user, tools)
 
+        if "JSON Schema" in system:
+            # Structured output: emit a minimal JSON object with an "answer" string.
+            return CompletionResult(content=json.dumps({"answer": self._finalize(user)}))
+
         # finalize
         return CompletionResult(content=self._finalize(user))
 

@@ -17,6 +17,7 @@ const ICONS = {
   tool_runner: "M5 3l14 9-14 9V3zM19 3v18",
   workflows: "M4 5a2 2 0 100 4 2 2 0 000-4zM18 15a2 2 0 100 4 2 2 0 000-4zM18 5a2 2 0 100 4 2 2 0 000-4zM6 7h8a2 2 0 012 2v0M6 7v6a2 2 0 002 2h8",
   history: "M3 3v6h6M3 9a9 9 0 102.5-6.4L3 9M12 7v5l4 2",
+  mcp: "M9 2v6M15 2v6M7 8h10v3a5 5 0 01-10 0V8zM12 16v6",
   sun: "M12 17a5 5 0 100-10 5 5 0 000 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
   moon: "M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z",
   copy: "M9 9h10v10H9zM5 15H4V5h10v1",
@@ -147,7 +148,7 @@ const NAV = [
   { group: "Workspace", items: [["chat", "Chat"], ["playground", "Playground"], ["workflows", "Workflows"], ["history", "History"]] },
   { group: "Library", items: [["tools", "Tools"], ["roles", "Roles"], ["tool_runner", "Tool Runner"]] },
   { group: "Insights", items: [["monitoring", "Monitoring"], ["eval", "Eval"], ["costs", "Costs"]] },
-  { group: "System", items: [["connections", "Connections"]] },
+  { group: "System", items: [["connections", "Connections"], ["mcp", "MCP Servers"]] },
 ];
 const VIEWS = {};
 function buildNav() {
@@ -174,6 +175,16 @@ function renderConnPill(conn) {
   const live = conn && conn.configured;
   pill.classList.toggle("live", !!live);
   label.textContent = live ? (conn.provider + " · " + conn.model) : "Offline";
+}
+
+// Re-fetch /api/meta (e.g. after connecting an MCP server changes the tool count).
+async function refreshMeta() {
+  try {
+    META = await api("/api/meta");
+    document.getElementById("version").textContent = "v" + META.version;
+    renderConnPill(META.connection);
+  } catch (e) { /* keep the stale META */ }
+  return META;
 }
 
 // Live-trace run: stream nodes from the SSE endpoint, then render the inspector.
@@ -425,6 +436,78 @@ VIEWS.connections = function () {
         "Do not expose the Studio publicly. Code-execution tools (run_python/run_command/run_tests) are " +
         "off unless the server is started with RIPTIDE_ENABLE_EXEC=1.")));
   renderStatus((META && META.connection) || { configured: false });
+};
+
+// =================== MCP Servers ===================
+VIEWS.mcp = function () {
+  const wrap = el("div", { class: "stack" });
+  view().append(
+    viewHead("MCP Servers",
+      "Attach external Model Context Protocol servers — their tools become real, runnable tools across Chat, Playground, Workflows and the Tool Runner."),
+    wrap);
+
+  function serverCard(s) {
+    const badge = el("span", { class: "badge " + (s.connected ? "ok" : "muted") },
+      s.connected ? "connected" : "not connected");
+    const meta = el("div", { class: "mcp-meta" },
+      s.description ? el("p", null, s.description) : null,
+      el("div", { class: "kv" }, el("span", { class: "muted" }, "command"), el("code", null, s.command)),
+      s.prefix ? el("div", { class: "kv" }, el("span", { class: "muted" }, "prefix"), el("code", null, s.prefix)) : null);
+    const tools = s.connected && s.tools.length
+      ? el("div", { class: "pills" }, ...s.tools.map((t) => el("span", { class: "chip" }, t)))
+      : null;
+    const btn = el("button", { class: "btn " + (s.connected ? "" : "primary") },
+      s.connected ? "Disconnect" : "Connect");
+    btn.onclick = async () => {
+      btn.disabled = true; btn.textContent = s.connected ? "Disconnecting…" : "Connecting…";
+      try {
+        if (s.connected) {
+          await jpost("/api/mcp/disconnect", { name: s.name });
+          toast(s.name + " disconnected", "ok");
+        } else {
+          const r = await jpost("/api/mcp/connect", { name: s.name });
+          toast("Connected " + s.name + " — " + r.tools.length + " tool(s) registered", "ok");
+        }
+        await refreshMeta();
+        await render();
+      } catch (e) {
+        toast(e.message, "bad");
+        btn.disabled = false; btn.textContent = s.connected ? "Disconnect" : "Connect";
+      }
+    };
+    return el("div", { class: "mcp-card" },
+      el("div", { class: "mcp-card-head" }, el("h3", null, s.name), badge),
+      meta, tools, el("div", { class: "btn-row" }, btn));
+  }
+
+  async function render() {
+    wrap.innerHTML = "";
+    let st;
+    try { st = await api("/api/mcp"); }
+    catch (e) { wrap.appendChild(el("div", { class: "banner bad" }, e.message)); return; }
+
+    wrap.appendChild(st.enabled
+      ? el("div", { class: "banner ok" },
+          "MCP connect is enabled. Connected tools join the live registry and are usable everywhere.")
+      : el("div", { class: "banner info" },
+          "MCP connect is disabled. Start the server with RIPTIDE_ENABLE_MCP_CONNECT=1 to enable it."));
+
+    if (!st.servers.length) {
+      wrap.appendChild(panel(el("div", { class: "empty" },
+        el("p", null, "No servers in the allowlist."),
+        el("p", { class: "hint" },
+          "Declare a JSON allowlist in the RIPTIDE_MCP_SERVERS environment variable, then restart:"),
+        el("pre", null,
+          "RIPTIDE_MCP_SERVERS='[{\"name\":\"fs\",\"command\":\"npx\"," +
+          "\"args\":[\"-y\",\"@modelcontextprotocol/server-filesystem\",\".\"],\"prefix\":\"fs.\"}]'"))));
+      return;
+    }
+    const grid = el("div", { class: "grid" });
+    st.servers.forEach((s) => grid.appendChild(serverCard(s)));
+    wrap.appendChild(grid);
+  }
+
+  render();
 };
 
 // =================== Chat ===================

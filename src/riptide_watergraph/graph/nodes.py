@@ -234,7 +234,7 @@ def _parse_tool_call(
         ctx.registry.validate_call(name, arguments)
     except ToolValidationError as exc:
         reason = str(exc).split(":", 1)[0]
-        if reason not in ("unknown_tool", "schema_violation"):
+        if reason not in ("unknown_tool", "schema_violation"):  # pragma: no cover - validate_call only raises these two
             reason = "schema_violation"
         return call_id, name, arguments, False, reason
 
@@ -414,7 +414,7 @@ def make_worker(ctx: GraphContext):
                 out = {"subtask": subtask, "output": observation, "tool_calls": [call]}
                 return {"results": [out], "cursor": cursor + 1, "metrics": metrics}
 
-            return {}  # unreachable; loop always returns above
+            return {}  # pragma: no cover - unreachable; loop always returns above
 
     return worker
 

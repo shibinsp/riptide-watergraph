@@ -134,6 +134,12 @@ riptide serve --port 8000          # then open http://127.0.0.1:8000/
 
 Views:
 
+- **Chat** — an AutoGen-Studio-style conversation with the multi-agent graph: message bubbles,
+  multi-turn history, a model-settings panel with **temperature / top_p / max_tokens** (and
+  Precise / Balanced / Creative presets) plus per-turn knobs, a **live "thinking" trace** that
+  streams the graph's nodes as they run, collapsible per-reply **agent details** (plan, roles,
+  steps, tool calls, verdicts, metrics), and export / clear. Sampling controls flow all the way to
+  the model gateway.
 - **Playground** — enter a task and toggle every knob (offline, single/swarm, LLM composer,
   memory, guardrails, **critic**, **supervisor**, **ReAct steps**, **vote k**, tenant, and an
   optional structured-output JSON Schema), run it, and read a full **inspector**: plan +

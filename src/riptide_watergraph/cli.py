@@ -61,6 +61,7 @@ def _run_task(
     critic: bool = False,
     supervisor: bool = False,
     react_steps: int = 1,
+    vote_k: int = 1,
 ) -> int:
     settings = get_settings()
     init_tracing(settings)
@@ -120,6 +121,7 @@ def _run_task(
             enable_critic=critic,
             enable_supervisor=supervisor,
             max_steps=react_steps,
+            vote_k=vote_k,
         )
 
         print(f" tenant={tenant_id} thread={thread_id}")
@@ -280,6 +282,8 @@ def main(argv: list[str] | None = None) -> int:
                             "--critic).")
     run_p.add_argument("--react", type=int, default=1, metavar="N",
                        help="Max think->act->observe steps per subtask (default 1).")
+    run_p.add_argument("--vote", type=int, default=1, metavar="K",
+                       help="Self-consistency samples for direct answers (default 1).")
 
     sub.add_parser("costs", help="Show the per-tenant cost dashboard.")
 
@@ -305,6 +309,7 @@ def main(argv: list[str] | None = None) -> int:
             critic=args.critic,
             supervisor=args.supervisor,
             react_steps=args.react,
+            vote_k=args.vote,
         )
     if args.command == "costs":
         return _show_costs()

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..interfaces.tools import ToolSpec
+from .dev_tools import dev_tool_specs
 from .registry import StaticToolRegistry
 
 # --- calculator (safe arithmetic eval) ---
@@ -161,8 +162,12 @@ ALL_SPECS = [
 
 
 def default_registry() -> StaticToolRegistry:
-    """A registry preloaded with the example tools."""
+    """A registry preloaded with the example + agentic developer tools.
+
+    Includes the workspace-confined dev tools (read/write/edit/search); code-execution
+    tools are added only when ``RIPTIDE_ENABLE_EXEC=1`` (see ``tools/dev_tools.py``).
+    """
     reg = StaticToolRegistry()
-    for spec in ALL_SPECS:
+    for spec in [*ALL_SPECS, *dev_tool_specs()]:
         reg.register(spec)
     return reg

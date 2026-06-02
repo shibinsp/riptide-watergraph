@@ -4,13 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "riptide-watergraph"
-version = "0.8.0"
+version = "0.9.0"
 description = "Riptide-Watergraph - a reusable, 'like water' multi-agent framework built as a thin layer on LangGraph."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Shibin Shanmughamprem", email = "shibin.shanmughamprema@nxzen.com" }]
 keywords = ["agents", "langgraph", "multi-agent", "llm", "orchestration"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 
 # Lean core: orchestration + memory + tools. The model provider and observability
 # stack are optional extras (imported lazily) so the skeleton installs and runs
@@ -58,6 +67,12 @@ dev = [
 [project.scripts]
 riptide-watergraph = "riptide_watergraph.cli:main"
 riptide = "riptide_watergraph.cli:main"
+
+[project.urls]
+Repository = "https://github.com/shibinsp/riptide-watergraph"
+Documentation = "https://github.com/shibinsp/riptide-watergraph#readme"
+Issues = "https://github.com/shibinsp/riptide-watergraph/issues"
+Changelog = "https://github.com/shibinsp/riptide-watergraph/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]

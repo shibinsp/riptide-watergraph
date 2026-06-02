@@ -345,8 +345,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_eval(args.offline)
     if args.command == "serve":
         return _serve(args.host, args.port)
-    parser.print_help()
-    return 1
+    parser.print_help()  # pragma: no cover - unreachable: subparser is required=True
+    return 1  # pragma: no cover
 
 
 def _serve(host: str, port: int) -> int:

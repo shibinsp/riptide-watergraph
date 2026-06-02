@@ -241,6 +241,41 @@ th { color: var(--ink-2); font-weight: 600; font-size: 12px; text-transform: upp
   .chat-main { height: auto; }
 }
 
+/* Workflow builder */
+.wf-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+.wf-toolbar input[type=text] { width: auto; min-width: 150px; }
+.wf-toolbar select { width: auto; }
+.wf-shell { display: flex; gap: 14px; align-items: stretch; height: calc(100vh - 250px); min-height: 420px; }
+.wf-palette { width: 200px; flex: 0 0 200px; display: flex; flex-direction: column; gap: 8px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; overflow: hidden; }
+.wf-pal-list { overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.wf-pal-item { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2);
+  cursor: grab; font-size: 13px; }
+.wf-pal-item:hover { border-color: var(--accent); }
+.wf-inspector-wrap { width: 280px; flex: 0 0 280px; overflow-y: auto; }
+.wf-inspector select, .wf-inspector textarea { width: 100%; }
+.wf-canvas-wrap { flex: 1; min-width: 0; overflow: auto; background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 22px 22px; }
+.wf-canvas { position: relative; }
+.wf-edges { position: absolute; inset: 0; pointer-events: none; }
+.wf-edge { fill: none; stroke: var(--ink-2); stroke-width: 2; }
+.wf-edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+.wf-edge-live { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; }
+.wf-nodes { position: absolute; inset: 0; }
+.wf-node { position: absolute; width: 184px; min-height: 76px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-sm); user-select: none; }
+.wf-node.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.wf-node-head { display: flex; justify-content: space-between; align-items: center; gap: 6px;
+  padding: 7px 10px; border-bottom: 1px solid var(--line); cursor: grab; font-weight: 600; font-size: 13px;
+  background: var(--accent-soft); color: var(--accent-strong); border-radius: 10px 10px 0 0; }
+.wf-del { border: 0; background: transparent; color: var(--ink-2); cursor: pointer; font-size: 16px; line-height: 1; }
+.wf-node-sub { padding: 8px 10px; font-size: 12px; color: var(--muted); max-height: 42px; overflow: hidden; }
+.wf-port { position: absolute; left: 50%; transform: translateX(-50%); width: 14px; height: 14px;
+  border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); cursor: crosshair; }
+.wf-port.in { top: -8px; } .wf-port.out { bottom: -8px; }
+.wf-port:hover { background: var(--accent); }
+
 /* Toasts */
 .toasts { position: fixed; top: 70px; right: 18px; display: flex; flex-direction: column; gap: 10px; z-index: 50; }
 .toast {

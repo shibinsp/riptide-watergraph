@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-02
+
+### Added
+- **Workflow builder** — a drag-and-drop canvas in the Studio (Workspace → Workflows) to compose
+  a multi-agent workflow: drag roles onto the canvas as **step nodes** (role + instruction),
+  connect them into a **dependency DAG**, then Run with a live node-by-node trace and per-node
+  results. Save/load named workflows and Clear.
+- `StaticPlanComposer` (`swarm/plan_composer.py`) — replays a user-authored plan/roles/dependencies
+  as a `SwarmDecision`, so a hand-drawn DAG runs on the existing swarm engine with **no graph
+  changes**.
+- `workflows.py` — `WorkflowSpec` models, `validate_spec` (rejects cycles/dups/dangling/self/empty
+  via Kahn), `spec_to_plan` (topo-sort → plan/roles/dependencies), and a slug-safe `WorkflowStore`.
+- `service.run_workflow` / `stream_workflow` + a `composer` override on `build_components`/
+  `run_task`/`stream_task`.
+- Endpoints: `GET/POST/GET{name}/DELETE /api/workflows`, `POST /api/workflows/run`, and
+  `GET /api/workflows/run/stream` (SSE).
+
+### Notes
+- Per-node model/tool overrides are not exposed: the swarm worker uses one global
+  `worker_model`/`sampling`; nodes carry role + instruction, tool scope comes from the role.
+  Side-effecting tools stay inert on the workflow (swarm) path.
+
 ## [0.6.0] - 2026-06-02
 
 ### Added

@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **Test coverage raised to 100%** (line) and enforced (`fail_under = 100` in `[tool.coverage.report]`
+  + CI `--cov-fail-under=100`). The previously-untested paths now run under test — `cli.py`,
+  the `litellm`/`psycopg`/MCP-stdio/OTEL boundaries are exercised against faked modules so they
+  execute in CI, and server SSE/error branches are covered. Added `skipif`-guarded **live** tests
+  (`test_litellm_live.py`, `test_mcp_stdio_live.py`, the pgvector roundtrip) for local runs with real
+  credentials. Only genuinely non-executable lines (abstract bodies, `__main__`, a few defensive
+  guards) are excluded via `exclude_lines` / `# pragma: no cover`.
+
 ## [0.10.0] - 2026-06-03
 
 ### Added

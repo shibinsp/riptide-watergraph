@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-02
+
+### Added
+- **Chat playground** (replaces the basic Sessions view): an AutoGen-Studio-style conversation
+  with message bubbles, a model-settings side panel, **live "thinking" trace** streaming (graph
+  nodes appear as they run, then the answer), collapsible **agent attribution + details** per
+  reply (plan↔roles, agent steps + tool calls, critic verdicts, metrics), and **export / clear**.
+- **Model sampling controls** threaded end-to-end (`temperature`, `top_p`, `max_tokens`) via a
+  `sampling` dict on `GraphContext` spread into every gateway call; exposed on `RunRequest`,
+  `MessageRequest`, and the chat UI (with Precise/Balanced/Creative presets). This also makes
+  self-consistency voting (`vote_k>1`) produce diverse samples (voting now defaults to
+  `temperature=0.7` when none is set).
+- Per-turn composition knobs in chat (memory, guardrails, critic, supervisor, single/swarm,
+  llm_composer, ReAct steps, vote k).
+- Backend: `service.stream_task` generalized to all knobs + history; `SessionStore` turns enriched
+  with plan/roles/results/verdicts/metrics + a `clear()`; new `GET
+  /api/sessions/{id}/messages/stream` (SSE) and `DELETE /sessions/{id}`.
+
 ## [0.5.0] - 2026-06-02
 
 ### Added

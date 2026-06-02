@@ -186,7 +186,15 @@ def run_task(
             config,
         )
         while "__interrupt__" in state and auto_approve:
-            state = graph.invoke(Command(resume={"approved": True}), config)
+            payload = state["__interrupt__"][0].value
+            if isinstance(payload, dict) and payload.get("type") == "clarification":
+                # No human in the loop here — let the worker proceed on its best assumption.
+                resume: dict[str, Any] = {
+                    "answer": "(no clarification available; proceed with your best assumption)"
+                }
+            else:
+                resume = {"approved": True}
+            state = graph.invoke(Command(resume=resume), config)
 
         _record_usage(settings, tenant_id, task, state)
 

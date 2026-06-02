@@ -157,17 +157,29 @@ for interactive approval/clarification prompts.
 do not expose it publicly. The API key stays in memory and masked. Code-execution tools are off
 unless you start the server with `RIPTIDE_ENABLE_EXEC=1`.
 
-### Agentic developer tools
+### Tools & roles at scale
 
-For coding & bug-fixing, the registry ships tools confined to a **workspace sandbox**
+The registry ships **150+ read-only, stdlib-only tools** (`tools/library.py`) across categories
+— text, regex, JSON/CSV, encoding, hashing, math/stats, datetime, units, collections, random,
+extract, code, color — plus a **120+ role catalog** (`swarm/role_library.py`) of domain
+specialists (engineering, data, devops/SRE, security, QA, product, writing, research, finance,
+ops, design). Each role carries a category-scoped tool allow-list, so on-demand retrieval keeps a
+worker's context small (`tool_k`) no matter how large the registry is. Browse and filter them in
+the Studio (Tools / Roles), or invoke one directly in the **Tool Runner**.
+
+For coding & bug-fixing, dedicated tools are confined to a **workspace sandbox**
 (`workspace_dir`, default `.riptide_watergraph/workspace`): `read_file`, `list_dir`,
 `find_files`, `search_code` (read-only) and `write_file`, `apply_edit` (mutating, approval-gated).
-A `coder` role uses them, and coding subtasks route to it automatically. Code execution
-(`run_python`, `run_command`, `run_tests`) is **opt-in** and registered only when the server is
-started with `RIPTIDE_ENABLE_EXEC=1` (each runs in the sandbox with a timeout):
+A `coder` role uses them, and coding subtasks route to it automatically.
+
+Two tool packs are **opt-in** (off by default, never togglable from the browser) and registered
+only when the server starts with the matching flag — code execution (`run_python`,
+`run_command`, `run_tests`, `run_node`, `lint_python`, `format_python`) under
+`RIPTIDE_ENABLE_EXEC=1`, and read-only network tools (`http_get`, `http_status`, `fetch_json`)
+under `RIPTIDE_ENABLE_NETWORK=1`:
 
 ```bash
-RIPTIDE_ENABLE_EXEC=1 riptide serve
+RIPTIDE_ENABLE_EXEC=1 RIPTIDE_ENABLE_NETWORK=1 riptide serve
 ```
 
 ## Repository layout

@@ -21,6 +21,7 @@ const ICONS = {
   sun: "M12 17a5 5 0 100-10 5 5 0 000 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
   moon: "M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z",
   copy: "M9 9h10v10H9zM5 15H4V5h10v1",
+  wave: "M2 7c2.4 0 2.4 2 4.8 2s2.4-2 4.8-2 2.4 2 4.8 2 2.4-2 4.8-2 M2 12c2.4 0 2.4 2 4.8 2s2.4-2 4.8-2 2.4 2 4.8 2 2.4-2 4.8-2 M2 17c2.4 0 2.4 2 4.8 2s2.4-2 4.8-2 2.4 2 4.8 2 2.4-2 4.8-2",
 };
 function icon(name) {
   const ns = "http://www.w3.org/2000/svg";
@@ -647,7 +648,7 @@ VIEWS.chat = function () {
     const cards = SAMPLE_PROMPTS.map((p) => el("button", { class: "sample-prompt",
       onclick: () => { input.value = p; send(); } }, p));
     return el("div", { class: "chat-empty" },
-      el("div", { class: "chat-empty-logo" }, "≈"),
+      el("div", { class: "chat-empty-logo" }, icon("wave")),
       el("h2", null, "Start a conversation"),
       el("div", { class: "muted" }, "Chat with the multi-agent graph. Try one of these:"),
       el("div", { class: "sample-prompts" }, ...cards));

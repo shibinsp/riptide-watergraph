@@ -170,13 +170,27 @@ unless you start the server with `RIPTIDE_ENABLE_EXEC=1`.
 
 ### Tools & roles at scale
 
-The registry ships **150+ read-only, stdlib-only tools** (`tools/library.py`) across categories
+The registry ships **200+ read-only, stdlib-only tools** (`tools/library.py`) across categories
 — text, regex, JSON/CSV, encoding, hashing, math/stats, datetime, units, collections, random,
-extract, code, color — plus a **120+ role catalog** (`swarm/role_library.py`) of domain
-specialists (engineering, data, devops/SRE, security, QA, product, writing, research, finance,
-ops, design). Each role carries a category-scoped tool allow-list, so on-demand retrieval keeps a
-worker's context small (`tool_k`) no matter how large the registry is. Browse and filter them in
-the Studio (Tools / Roles), or invoke one directly in the **Tool Runner**.
+extract, code, color, validation — plus a **220+ role catalog** (`swarm/role_library.py`) of
+domain specialists across engineering, data, devops/SRE, security, QA, product, writing, research,
+finance, ops, design, **and enterprise functions/verticals** (sales, marketing, support, HR,
+legal, compliance, healthcare, fintech, retail, manufacturing…). Each role carries a
+category-scoped tool allow-list, so on-demand retrieval keeps a worker's context small (`tool_k`)
+no matter how large the registry is. Browse and filter them in the Studio (Tools / Roles), or
+invoke one directly in the **Tool Runner**.
+
+**Enterprise connectors (opt-in, MCP-bindable).** Set `RIPTIDE_ENABLE_ENTERPRISE=1` to register a
+catalog of **~500 connector tools** (`tools/enterprise.py`) for ~37 vendors (Salesforce, Jira,
+GitHub, ServiceNow, Slack, Snowflake, Stripe, …) across CRM/ITSM/DevOps/cloud/data/comms/HR/finance.
+Offline they are **deterministic stubs**; bind a real [MCP](https://modelcontextprotocol.io)
+server for a vendor (`register_mcp_tools(registry, client, prefix="vendor.")`) to make them
+execute for real. Write actions are `side_effecting` (human-approval gated) and stay inert until
+bound:
+
+```bash
+RIPTIDE_ENABLE_ENTERPRISE=1 riptide serve   # ~750 tools in the gallery
+```
 
 For coding & bug-fixing, dedicated tools are confined to a **workspace sandbox**
 (`workspace_dir`, default `.riptide_watergraph/workspace`): `read_file`, `list_dir`,

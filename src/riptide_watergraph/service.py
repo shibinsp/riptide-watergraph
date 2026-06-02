@@ -64,6 +64,17 @@ class RunResult(BaseModel):
     tool_calls_valid: int = 0
     structured: dict[str, Any] | None = None
 
+    # --- detail fields for the Studio inspector (additive; default-empty) ---
+    plan: list[str] = Field(default_factory=list)
+    roles: list[str] = Field(default_factory=list)
+    results: list[dict[str, Any]] = Field(default_factory=list)
+    verdicts: list[dict[str, Any]] = Field(default_factory=list)
+    swarm_decision: dict[str, Any] = Field(default_factory=dict)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    guard_violations: list[str] = Field(default_factory=list)
+    guard_violations_out: list[str] = Field(default_factory=list)
+    clarifications: dict[str, str] = Field(default_factory=dict)
+
 
 def build_components(
     settings: Settings,
@@ -143,6 +154,10 @@ def run_task(
     llm_composer: bool = False,
     history: list[str] | None = None,
     auto_approve: bool = True,
+    critic: bool = False,
+    supervisor: bool = False,
+    react_steps: int = 1,
+    vote_k: int = 1,
     final_schema: dict[str, Any] | None = None,
     settings: Settings | None = None,
 ) -> RunResult:
@@ -178,6 +193,10 @@ def run_task(
             guardrails=comp.guardrails,
             planner_model=comp.planner_model,
             worker_model=comp.worker_model,
+            enable_critic=critic,
+            enable_supervisor=supervisor,
+            max_steps=react_steps,
+            vote_k=vote_k,
             final_schema=final_schema,
         )
         state = graph.invoke(
@@ -211,6 +230,15 @@ def run_task(
         tool_calls_total=metrics.get("tool_calls_total", 0),
         tool_calls_valid=metrics.get("tool_calls_valid", 0),
         structured=state.get("structured_output") or None,
+        plan=state.get("plan") or [],
+        roles=state.get("roles") or [],
+        results=list(state.get("results") or []),
+        verdicts=list(state.get("verdicts") or []),
+        swarm_decision=decision,
+        metrics=metrics,
+        guard_violations=state.get("guard_violations") or [],
+        guard_violations_out=state.get("guard_violations_out") or [],
+        clarifications=state.get("clarifications") or {},
     )
 
 

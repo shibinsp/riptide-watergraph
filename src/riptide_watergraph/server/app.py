@@ -40,10 +40,11 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
-from ..config import get_settings
+from ..config import McpServerConfig, get_settings
 from ..evaluation import EvalReport, EvalRunner
 from ..gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from ..interfaces.gateway import Message
+from ..mcp import McpClient, register_mcp_tools
 from ..observability.cost import BudgetExceeded, CostTracker, TenantTotals, _PRICE_PER_1K
 from ..service import (
     RunResult,
@@ -54,11 +55,11 @@ from ..service import (
     stream_workflow,
 )
 from ..swarm.roles import AgentRole, all_roles
-from ..tools import default_registry
-from ..tools.registry import ToolValidationError
+from ..tools import default_registry, register_dynamic_spec, remove_dynamic_specs
+from ..tools.registry import StaticToolRegistry, ToolValidationError
 from ..workflows import WorkflowSpec, WorkflowStore, WorkflowValidationError, validate_spec
 
-_VERSION = "0.9.0"
+_VERSION = "0.10.0"
 _STATIC = Path(__file__).parent / "static"
 _sessions = SessionStore()
 _workflows = WorkflowStore()
@@ -83,6 +84,33 @@ _PROVIDER_KEY_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY
                      "custom": "OPENAI_API_KEY"}
 _conn_lock = threading.Lock()
 _connection: dict[str, str] = {"provider": "offline", "model": "", "api_base": "", "api_key": ""}
+
+# --- MCP connect (gated + allowlisted; see config.McpServerConfig) ------------
+# Tracks which (prefixed) tool names each connected server contributed, so disconnect
+# removes exactly those from the dynamic-spec store.
+_mcp_lock = threading.Lock()
+_mcp_connected: dict[str, list[str]] = {}
+
+
+def _mcp_enabled() -> bool:
+    """The connect feature is off unless RIPTIDE_ENABLE_MCP_CONNECT is truthy."""
+    return os.getenv("RIPTIDE_ENABLE_MCP_CONNECT", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _mcp_allowlist() -> dict[str, McpServerConfig]:
+    """Name -> config for every server the operator declared in RIPTIDE_MCP_SERVERS."""
+    return {s.name: s for s in get_settings().riptide_mcp_servers}
+
+
+def _build_mcp_client(cfg: McpServerConfig) -> McpClient:
+    """Build the real stdio client for an allowlisted server.
+
+    Lazy-imports the optional ``[mcp]`` SDK so the server runs without it until a real
+    connect happens. Tests monkeypatch this to return a ``FakeMcpClient`` (no subprocess).
+    """
+    from ..mcp.stdio import StdioMcpClient
+
+    return StdioMcpClient(cfg.command, cfg.args, cfg.env or None)
 
 
 class RunRequest(BaseModel):
@@ -184,6 +212,29 @@ class ConnectionTestResult(BaseModel):
     detail: str
 
 
+class McpServerInfo(BaseModel):
+    name: str
+    prefix: str
+    description: str
+    command: str
+    connected: bool
+    tools: list[str]
+
+
+class McpStatus(BaseModel):
+    enabled: bool
+    servers: list[McpServerInfo]
+
+
+class McpConnectRequest(BaseModel):
+    name: str
+
+
+class McpConnectResult(BaseModel):
+    name: str
+    tools: list[str]
+
+
 class MetaResponse(BaseModel):
     version: str
     defaults: dict[str, Any]
@@ -195,6 +246,7 @@ class MetaResponse(BaseModel):
     tool_categories: list[str]
     role_categories: list[str]
     connection: ConnectionStatus
+    mcp: dict[str, Any] = {}
 
 
 def _sse(obj: dict) -> str:
@@ -229,6 +281,24 @@ def _apply_connection() -> None:
         os.environ[_PROVIDER_KEY_ENV[c["provider"]]] = c["api_key"]
     if c["api_base"]:
         os.environ["OPENAI_API_BASE"] = c["api_base"]
+
+
+def _mcp_status() -> McpStatus:
+    """Current allowlist + which servers are connected (and the tools they contributed)."""
+    with _mcp_lock:
+        connected = dict(_mcp_connected)
+    servers = [
+        McpServerInfo(
+            name=cfg.name,
+            prefix=cfg.prefix,
+            description=cfg.description,
+            command=" ".join([cfg.command, *cfg.args]),
+            connected=cfg.name in connected,
+            tools=connected.get(cfg.name, []),
+        )
+        for cfg in get_settings().riptide_mcp_servers
+    ]
+    return McpStatus(enabled=_mcp_enabled(), servers=servers)
 
 
 def create_app() -> FastAPI:
@@ -372,6 +442,7 @@ def create_app() -> FastAPI:
             tool_categories=sorted({s.category for s in specs}),
             role_categories=sorted({r.category for r in roles}),
             connection=_connection_status(),
+            mcp={"enabled": _mcp_enabled(), "connected": len(_mcp_connected)},
         )
 
     @app.get("/api/tools", response_model=list[ToolInfo])
@@ -494,6 +565,41 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001 - report any failure, never crash
             return ConnectionTestResult(ok=False, model=model, latency_ms=0,
                                         detail=f"{type(exc).__name__}: {exc}")
+
+    # --- MCP connect (gated + allowlisted): make connector tools real ---
+
+    @app.get("/api/mcp", response_model=McpStatus)
+    def api_mcp_status() -> McpStatus:
+        return _mcp_status()
+
+    @app.post("/api/mcp/connect", response_model=McpConnectResult)
+    def api_mcp_connect(req: McpConnectRequest) -> McpConnectResult:
+        if not _mcp_enabled():
+            raise HTTPException(
+                status_code=403,
+                detail="MCP connect is disabled — set RIPTIDE_ENABLE_MCP_CONNECT=1 to enable it",
+            )
+        cfg = _mcp_allowlist().get(req.name)
+        if cfg is None:
+            raise HTTPException(status_code=404, detail=f"server not in allowlist: {req.name}")
+        try:
+            client = _build_mcp_client(cfg)
+            tmp = StaticToolRegistry()
+            names = asyncio.run(register_mcp_tools(tmp, client, prefix=cfg.prefix))
+            for spec in tmp.all_specs():
+                register_dynamic_spec(spec)
+        except Exception as exc:  # noqa: BLE001 - surface any connect failure, never crash
+            raise HTTPException(status_code=400, detail=f"{type(exc).__name__}: {exc}") from exc
+        with _mcp_lock:
+            _mcp_connected[req.name] = names
+        return McpConnectResult(name=req.name, tools=names)
+
+    @app.post("/api/mcp/disconnect", response_model=McpStatus)
+    def api_mcp_disconnect(req: McpConnectRequest) -> McpStatus:
+        with _mcp_lock:
+            names = _mcp_connected.pop(req.name, [])
+        remove_dynamic_specs(names)
+        return _mcp_status()
 
     # --- Workflow builder (canvas DAG -> StaticPlanComposer -> swarm run) ---
 

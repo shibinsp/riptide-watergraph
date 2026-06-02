@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-03
+
+### Added
+- **Real MCP connectors (gated + allowlisted).** A Studio "MCP Servers" view and
+  `GET/POST /api/mcp[/connect|/disconnect]` let an operator attach an external Model Context
+  Protocol server so its tools become real, runnable tools across Chat, Playground, Workflows and
+  the Tool Runner. The feature is **off by default** — it works only when
+  `RIPTIDE_ENABLE_MCP_CONNECT=1` **and** the target server is pre-declared in the
+  `RIPTIDE_MCP_SERVERS` allowlist (`McpServerConfig`); the browser never supplies an arbitrary
+  command. Read-only MCP tools run inline; mutating ones stay HITL-gated.
+- A **dynamic-spec store** in `tools/examples.py` (`register_dynamic_spec` / `remove_dynamic_specs` /
+  `clear_dynamic_specs` / `dynamic_specs`) that `default_registry()` appends, so runtime-registered
+  tools persist into every subsequent run/eval/HTTP request (previously a fresh registry was built
+  per call). `GET /api/meta` now reports an `mcp` summary (`enabled`, `connected`).
+- `examples/mcp_connect.py` — offline end-to-end demo (via `FakeMcpClient`) of the connect flow.
+
 ## [0.9.0] - 2026-06-02
 
 ### Added

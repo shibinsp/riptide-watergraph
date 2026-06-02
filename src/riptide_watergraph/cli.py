@@ -49,6 +49,14 @@ def _prompt_approval(payload: dict[str, Any]) -> bool:
     return reply in ("y", "yes")
 
 
+def _prompt_clarification(payload: dict[str, Any]) -> str:
+    """Ask the operator to answer a worker's clarifying question."""
+    print("\n  CLARIFICATION REQUESTED")
+    print(f"   subtask:  {payload.get('subtask')}")
+    print(f"   question: {payload.get('question')}")
+    return input("   Your answer: ").strip()
+
+
 def _run_task(
     task: str,
     *,
@@ -132,13 +140,21 @@ def _run_task(
             {"task": task, "session_id": thread_id, "tenant_id": tenant_id}, config
         )
 
-        # Resume loop: handle one or more approval interrupts.
+        # Resume loop: handle approval and clarification interrupts.
         while "__interrupt__" in result:
             payload = result["__interrupt__"][0].value
-            approved = True if auto_approve else _prompt_approval(payload)
-            if auto_approve:
-                print(f" auto-approved: {payload.get('tool')}")
-            result = graph.invoke(Command(resume={"approved": approved}), config)
+            if isinstance(payload, dict) and payload.get("type") == "clarification":
+                if auto_approve:
+                    answer = "(no clarification available; proceed with your best assumption)"
+                    print(f" auto-clarify: {payload.get('question')}")
+                else:
+                    answer = _prompt_clarification(payload)
+                result = graph.invoke(Command(resume={"answer": answer}), config)
+            else:
+                approved = True if auto_approve else _prompt_approval(payload)
+                if auto_approve:
+                    print(f" auto-approved: {payload.get('tool')}")
+                result = graph.invoke(Command(resume={"approved": approved}), config)
 
         _print_result(result, memory_on=memory_on, memory=memory)
         _record_usage(settings, tenant_id, task, result)

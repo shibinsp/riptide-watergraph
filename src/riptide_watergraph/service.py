@@ -30,9 +30,16 @@ from .observability.cost import (
     cost_from_usage,
     estimate_tokens,
 )
+from .interfaces.swarm import SwarmComposer
 from .observability.tracing import init_tracing
-from .swarm import HeuristicSwarmComposer, LLMSwarmComposer, SingleAgentComposer
+from .swarm import (
+    HeuristicSwarmComposer,
+    LLMSwarmComposer,
+    SingleAgentComposer,
+    StaticPlanComposer,
+)
 from .tools import default_registry
+from .workflows import WorkflowSpec, spec_to_plan, validate_spec
 
 
 @dataclass
@@ -85,6 +92,7 @@ def build_components(
     memory_on: bool = True,
     guardrails_on: bool = True,
     llm_composer: bool = False,
+    composer: SwarmComposer | None = None,
 ) -> Components:
     """Assemble the swappable layers from settings + flags (shared by CLI + server)."""
     tenant_id = tenant_id or settings.tenant_id
@@ -95,8 +103,10 @@ def build_components(
     base = DemoGateway() if offline else LiteLLMGateway(default_model=model)
     gateway = ResilientGateway(base)
 
-    if single:
-        composer: Any = SingleAgentComposer(model=planner_model)
+    if composer is not None:
+        pass  # caller-supplied (e.g. a StaticPlanComposer from a workflow spec)
+    elif single:
+        composer = SingleAgentComposer(model=planner_model)
     elif llm_composer:
         composer = LLMSwarmComposer(gateway, model=planner_model)
     else:
@@ -160,6 +170,7 @@ def run_task(
     vote_k: int = 1,
     final_schema: dict[str, Any] | None = None,
     sampling: dict[str, Any] | None = None,
+    composer: SwarmComposer | None = None,
     settings: Settings | None = None,
 ) -> RunResult:
     """Run a task end-to-end and return a structured result (no console I/O)."""
@@ -178,6 +189,7 @@ def run_task(
         memory_on=memory_on,
         guardrails_on=guardrails_on,
         llm_composer=llm_composer,
+        composer=composer,
     )
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
@@ -264,6 +276,7 @@ def stream_task(
     vote_k: int = 1,
     sampling: dict[str, Any] | None = None,
     history: list[str] | None = None,
+    composer: SwarmComposer | None = None,
     settings: Settings | None = None,
 ):
     """Run a task, yielding ``("node", name)`` per executed graph node then
@@ -277,6 +290,7 @@ def stream_task(
     comp = build_components(
         settings, tenant_id=tenant_id, offline=offline, single=single,
         memory_on=memory_on, guardrails_on=guardrails_on, llm_composer=llm_composer,
+        composer=composer,
     )
     config = {"configurable": {"thread_id": str(uuid.uuid4())}}
     with SqliteSaver.from_conn_string(settings.checkpoint_path) as cp:
@@ -308,6 +322,59 @@ def stream_task(
         final = dict(graph.get_state(config).values)
         _record_usage(settings, tenant_id, task, final)
     yield ("result", _result_from_state(tenant_id, final))
+
+
+def _workflow_composer(spec: WorkflowSpec, settings: Settings) -> StaticPlanComposer:
+    """Validate a workflow spec and build a StaticPlanComposer that replays its DAG."""
+    validate_spec(spec)
+    plan, roles, dependencies = spec_to_plan(spec)
+    return StaticPlanComposer(
+        plan=plan, roles=roles, dependencies=dependencies,
+        model=settings.riptide_watergraph_model,
+        mode=None if spec.mode == "auto" else spec.mode,
+    )
+
+
+def run_workflow(
+    spec: WorkflowSpec,
+    *,
+    tenant_id: str | None = None,
+    offline: bool = False,
+    memory_on: bool = True,
+    guardrails_on: bool = True,
+    critic: bool = False,
+    supervisor: bool = False,
+    settings: Settings | None = None,
+) -> RunResult:
+    """Run a user-authored workflow spec as a dependency-ordered swarm."""
+    settings = settings or get_settings()
+    composer = _workflow_composer(spec, settings)
+    return run_task(
+        spec.goal or spec.name, tenant_id=tenant_id, offline=offline,
+        memory_on=memory_on, guardrails_on=guardrails_on, critic=critic,
+        supervisor=supervisor, composer=composer, settings=settings,
+    )
+
+
+def stream_workflow(
+    spec: WorkflowSpec,
+    *,
+    tenant_id: str | None = None,
+    offline: bool = True,
+    memory_on: bool = True,
+    guardrails_on: bool = True,
+    critic: bool = False,
+    supervisor: bool = False,
+    settings: Settings | None = None,
+):
+    """Stream a workflow run (node-by-node trace then result), like ``stream_task``."""
+    settings = settings or get_settings()
+    composer = _workflow_composer(spec, settings)
+    yield from stream_task(
+        spec.goal or spec.name, tenant_id=tenant_id, offline=offline,
+        memory_on=memory_on, guardrails_on=guardrails_on, critic=critic,
+        supervisor=supervisor, composer=composer, settings=settings,
+    )
 
 
 def _record_usage(settings: Settings, tenant_id: str, task: str, state: dict) -> None:

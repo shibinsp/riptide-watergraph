@@ -50,6 +50,7 @@ def build_graph(
     enable_supervisor: bool = False,
     max_rounds: int = 2,
     max_steps: int = 1,
+    vote_k: int = 1,
 ):
     """Build and compile the orchestrator-worker graph.
 
@@ -78,6 +79,7 @@ def build_graph(
         recall_k=recall_k,
         max_rounds=max_rounds,
         max_steps=max_steps,
+        vote_k=vote_k,
     )
 
     g: StateGraph = StateGraph(OrchestratorState)

@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-02
+
+### Added
+- **Monitoring dashboard** — a Studio "Monitoring" view + `GET /api/monitoring` that aggregate the
+  per-run usage log into KPIs (runs, success rate, avg latency, tokens, cost, tool-call validity,
+  blocked), runs/cost-over-time charts (inline SVG), by-mode breakdown, and a recent-runs table.
+- `UsageRecord` now captures `latency_ms`, `success`, `tool_calls_total/valid`, `n_subtasks`, and a
+  real `ts` (set at record time); `run_task`/`stream_task` measure end-to-end latency.
+- **PyPI release pipeline** — `.github/workflows/publish.yml` builds + publishes on a `vX.Y.Z` tag
+  via PyPI Trusted Publishing (OIDC, no stored token). Added `[project.urls]` + classifiers and
+  documented `pip install riptide-watergraph` (+ the `git+https` install that works pre-release).
+
 ## [0.8.0] - 2026-06-02
 
 ### Added

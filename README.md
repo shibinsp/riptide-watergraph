@@ -121,6 +121,33 @@ docker run -p 8000:8000 riptide-watergraph        # GET http://localhost:8000/he
 
 The image installs the `[server]` extra and runs `riptide serve` (uvicorn) on port 8000.
 
+## Like Water Studio (web UI)
+
+`riptide serve` also serves a **dependency-free web studio** (an AutoGen-Studio-style UI,
+vanilla JS — no Node/build step) at the server root:
+
+```bash
+pip install -e ".[server]"
+riptide serve --port 8000          # then open http://127.0.0.1:8000/
+```
+
+Six views:
+
+- **Playground** — enter a task and toggle every knob (offline, single/swarm, LLM composer,
+  memory, guardrails, **critic**, **supervisor**, **ReAct steps**, **vote k**, tenant, and an
+  optional structured-output JSON Schema), run it, and read a full **inspector**: plan +
+  roles, swarm decision, per-subtask results with tool calls, critic verdicts, structured
+  output, recalled/stored lessons, metrics, and guardrail violations.
+- **Sessions** — multi-turn conversations (each turn sees prior answers).
+- **Tools** / **Roles** — browse the registered tool catalog and the built-in agent roles.
+- **Eval** — run the offline behavioral suite and view the report.
+- **Costs** — the per-tenant usage/spend dashboard.
+
+It is backed by read-only JSON endpoints — `GET /api/meta`, `/api/tools`, `/api/roles`,
+`/api/costs`, and `POST /api/eval` — alongside the existing `/run`, `/run/stream`, and
+`/sessions/*`. HITL is **auto-approve** in the Studio (headless); use the CLI for interactive
+approval/clarification prompts.
+
 ## Repository layout
 
 ```

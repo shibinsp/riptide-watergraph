@@ -159,6 +159,7 @@ def run_task(
     react_steps: int = 1,
     vote_k: int = 1,
     final_schema: dict[str, Any] | None = None,
+    sampling: dict[str, Any] | None = None,
     settings: Settings | None = None,
 ) -> RunResult:
     """Run a task end-to-end and return a structured result (no console I/O)."""
@@ -198,6 +199,7 @@ def run_task(
             max_steps=react_steps,
             vote_k=vote_k,
             final_schema=final_schema,
+            sampling=sampling,
         )
         state = graph.invoke(
             {"task": _with_history(task, history), "session_id": thread_id,
@@ -252,6 +254,16 @@ def stream_task(
     *,
     tenant_id: str | None = None,
     offline: bool = True,
+    memory_on: bool = True,
+    single: bool = False,
+    guardrails_on: bool = True,
+    llm_composer: bool = False,
+    critic: bool = False,
+    supervisor: bool = False,
+    react_steps: int = 1,
+    vote_k: int = 1,
+    sampling: dict[str, Any] | None = None,
+    history: list[str] | None = None,
     settings: Settings | None = None,
 ):
     """Run a task, yielding ``("node", name)`` per executed graph node then
@@ -262,16 +274,22 @@ def stream_task(
     Path(settings.checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
     enforce_budget(settings, tenant_id)
 
-    comp = build_components(settings, tenant_id=tenant_id, offline=offline)
+    comp = build_components(
+        settings, tenant_id=tenant_id, offline=offline, single=single,
+        memory_on=memory_on, guardrails_on=guardrails_on, llm_composer=llm_composer,
+    )
     config = {"configurable": {"thread_id": str(uuid.uuid4())}}
     with SqliteSaver.from_conn_string(settings.checkpoint_path) as cp:
         graph = build_graph(
             gateway=comp.gateway, registry=comp.registry, composer=comp.composer,
             model=comp.model, checkpointer=cp, memory=comp.memory, reflector=comp.reflector,
             guardrails=comp.guardrails, planner_model=comp.planner_model,
-            worker_model=comp.worker_model,
+            worker_model=comp.worker_model, enable_critic=critic,
+            enable_supervisor=supervisor, max_steps=react_steps, vote_k=vote_k,
+            sampling=sampling,
         )
-        pending: Any = {"task": task, "session_id": config["configurable"]["thread_id"],
+        pending: Any = {"task": _with_history(task, history),
+                        "session_id": config["configurable"]["thread_id"],
                         "tenant_id": tenant_id}
         for _ in range(50):  # bounded: re-stream after each auto-approved interrupt
             for chunk in graph.stream(pending, config, stream_mode="updates"):
@@ -323,15 +341,27 @@ class SessionStore:
     """In-process multi-turn conversation store (per-process; swap for a DB in prod)."""
 
     def __init__(self) -> None:
-        self._sessions: dict[str, list[dict[str, str]]] = {}
+        self._sessions: dict[str, list[dict[str, Any]]] = {}
 
     def history(self, session_id: str) -> list[str]:
         return [t["answer"] for t in self._sessions.get(session_id, [])]
 
-    def turns(self, session_id: str) -> list[dict[str, str]]:
+    def turns(self, session_id: str) -> list[dict[str, Any]]:
         return list(self._sessions.get(session_id, []))
 
-    def append(self, session_id: str, task: str, answer: str) -> None:
-        self._sessions.setdefault(session_id, []).append(
-            {"task": task, "answer": answer or ""}
-        )
+    def append(self, session_id: str, task: str, result: RunResult) -> None:
+        """Store an enriched turn (answer + inspector detail) for chat rendering."""
+        self._sessions.setdefault(session_id, []).append({
+            "task": task,
+            "answer": result.final_answer or "",
+            "mode": result.mode,
+            "plan": result.plan,
+            "roles": result.roles,
+            "results": result.results,
+            "verdicts": result.verdicts,
+            "metrics": result.metrics,
+            "blocked": result.blocked,
+        })
+
+    def clear(self, session_id: str) -> None:
+        self._sessions.pop(session_id, None)

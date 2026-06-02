@@ -129,6 +129,8 @@ body {
 .card-head .chev { color: var(--ink-2); }
 .card-body { padding: 0 18px 16px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.filterbar { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.filterbar .segmented { max-height: 132px; overflow-y: auto; }
 
 /* Forms */
 label.lbl { display: block; font-weight: 600; margin-bottom: 6px; font-size: 13px; }

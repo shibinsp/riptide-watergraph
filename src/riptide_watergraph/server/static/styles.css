@@ -214,6 +214,16 @@ th { color: var(--ink-2); font-weight: 600; font-size: 12px; text-transform: upp
 .banner.info { background: var(--accent-soft); color: var(--accent-strong); }
 .kv { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
 
+/* MCP servers — allowlist cards */
+.mcp-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.mcp-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mcp-card-head h3 { margin: 0; font-size: 15px; }
+.mcp-meta { display: flex; flex-direction: column; gap: 6px; }
+.mcp-meta p { margin: 0 0 4px; color: var(--ink-2); font-size: 13.5px; }
+.mcp-meta code { background: var(--surface-2); padding: 2px 7px; border-radius: 6px; font-size: 12.5px; }
+.badge.muted { background: var(--surface-2); color: var(--ink-2); }
+
 /* Chat — 3-pane: conversations · thread · settings */
 .chat-grid { display: grid; grid-template-columns: 216px 1fr 300px; gap: 16px;
   align-items: stretch; height: calc(100vh - 168px); min-height: 440px; }

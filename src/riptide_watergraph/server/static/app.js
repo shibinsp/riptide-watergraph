@@ -198,7 +198,7 @@ VIEWS.playground = function () {
           el("div", { style: "margin-top:12px" },
             el("label", { class: "lbl" }, "Structured output schema (JSON Schema, optional)"),
             schema, schemaErr)), false),
-        el("div", { class: "btn-row" }, runBtn))),
+        el("div", { class: "btn-row" }, runBtn)))),
     out);
 };
 

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Like Water Studio · riptide-watergraph</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="wave">~</div>
+        <div>
+          <div class="brand-title">Like Water Studio</div>
+          <div class="brand-sub">riptide-watergraph</div>
+        </div>
+      </div>
+      <nav id="nav">
+        <button class="nav-item active" data-view="playground">Playground</button>
+        <button class="nav-item" data-view="sessions">Sessions</button>
+        <button class="nav-item" data-view="tools">Tools</button>
+        <button class="nav-item" data-view="roles">Roles</button>
+        <button class="nav-item" data-view="eval">Eval</button>
+        <button class="nav-item" data-view="costs">Costs</button>
+      </nav>
+      <div class="sidebar-foot">
+        <span id="meta-model" class="badge">model: …</span>
+        <span id="meta-version" class="badge ghost">v…</span>
+      </div>
+    </aside>
+    <main id="view" class="view"></main>
+  </div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

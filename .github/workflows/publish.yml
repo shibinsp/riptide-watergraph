@@ -1,0 +1,55 @@
+name: Publish to PyPI
+
+# Builds the sdist + wheel and publishes to PyPI when a version tag (vX.Y.Z) is pushed.
+# Uses PyPI Trusted Publishing (OIDC) — no API token stored in the repo. One-time setup:
+#   1. Create the project on https://pypi.org (or reserve the name with a first manual upload).
+#   2. Add a Trusted Publisher: PyPI -> project -> Publishing -> GitHub Actions
+#      (owner: shibinsp, repo: riptide-watergraph, workflow: publish.yml, environment: pypi).
+#   3. Bump the version in pyproject.toml + __init__.py, update CHANGELOG, then:
+#        git tag v0.9.0 && git push origin v0.9.0
+#   The tag push triggers this workflow and `pip install riptide-watergraph` goes live.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+      - name: Check artifacts
+        run: |
+          python -m pip install --upgrade twine
+          twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/riptide-watergraph
+    permissions:
+      id-token: write  # OIDC for PyPI Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

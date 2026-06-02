@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from ..interfaces.tools import ToolSpec
 from .dev_tools import dev_tool_specs
+from .library import library_specs
 from .registry import StaticToolRegistry
 
 # --- calculator (safe arithmetic eval) ---
@@ -99,6 +100,7 @@ CALCULATOR_SPEC = ToolSpec(
         "additionalProperties": False,
     },
     side_effecting=False,
+    category="math",
     handler=calculator,
 )
 
@@ -115,6 +117,7 @@ WRITE_NOTE_SPEC = ToolSpec(
         "additionalProperties": False,
     },
     side_effecting=True,
+    category="code",
     handler=write_note,
 )
 
@@ -130,6 +133,7 @@ def _text_tool(name: str, description: str, handler) -> ToolSpec:
             "additionalProperties": False,
         },
         side_effecting=False,
+        category="text",
         handler=handler,
     )
 
@@ -148,6 +152,7 @@ WEB_SEARCH_SPEC = ToolSpec(
         "additionalProperties": False,
     },
     side_effecting=False,
+    category="web",
     handler=web_search,
 )
 
@@ -168,6 +173,6 @@ def default_registry() -> StaticToolRegistry:
     tools are added only when ``RIPTIDE_ENABLE_EXEC=1`` (see ``tools/dev_tools.py``).
     """
     reg = StaticToolRegistry()
-    for spec in [*ALL_SPECS, *dev_tool_specs()]:
+    for spec in [*ALL_SPECS, *dev_tool_specs(), *library_specs()]:
         reg.register(spec)
     return reg

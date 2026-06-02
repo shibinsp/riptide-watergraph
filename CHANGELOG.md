@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-02
+
+### Added
+- **100+ stdlib tools** (`tools/library.py`): ~150 read-only, dependency-free tools across
+  text, regex, JSON/CSV, encoding, hashing, math/stats, datetime, units, collections, random,
+  extract, code, and color categories. A gated **network** pack (`RIPTIDE_ENABLE_NETWORK=1`)
+  adds read-only HTTP/DNS tools; extra exec tools (`run_node`, `lint_python`, `format_python`)
+  join the existing `RIPTIDE_ENABLE_EXEC=1` set.
+- **100+ role catalog** (`swarm/role_library.py`): ~120 domain specialists (engineering, data,
+  devops/SRE, security, QA, product, writing, research, finance, ops, design) with focused
+  prompts, category-scoped tool allow-lists, and descriptions. `role_for` routes the
+  highest-traffic specialists; `get_role`/`all_roles` resolve the full catalog.
+- `ToolSpec` and `AgentRole` gain `category`/`tags` (and role `description`) for grouping.
+- **Studio Tool Runner** (`POST /api/tools/{name}/invoke`, read-only tools only) and a UI view
+  to invoke a single tool with a schema-built form.
+- **Live execution trace** (`GET /api/run/trace` SSE + `service.stream_task`) streamed
+  node-by-node into the Playground.
+- Studio **search + category filters** on the Tools and Roles galleries, and a local
+  **run history** view with replay.
+
 ## [0.4.0] - 2026-06-02
 
 ### Added

@@ -48,9 +48,22 @@ from ..swarm.roles import AgentRole, all_roles
 from ..tools import default_registry
 from ..tools.registry import ToolValidationError
 
-_VERSION = "0.5.0"
+_VERSION = "0.6.0"
 _STATIC = Path(__file__).parent / "static"
 _sessions = SessionStore()
+
+
+def _sampling(temperature: float | None, top_p: float | None,
+              max_tokens: int | None) -> dict[str, Any] | None:
+    """Collect set sampling params into a dict litellm understands (None => model default)."""
+    s: dict[str, Any] = {}
+    if temperature is not None:
+        s["temperature"] = temperature
+    if top_p is not None:
+        s["top_p"] = top_p
+    if max_tokens is not None:
+        s["max_tokens"] = max_tokens
+    return s or None
 
 # --- runtime AI connection (in-memory; key never persisted to disk) ----------
 # Maps a provider to the env var litellm reads. Mirrored to os.environ on change so the
@@ -74,12 +87,26 @@ class RunRequest(BaseModel):
     react_steps: int = 1
     vote_k: int = 1
     final_schema: dict[str, Any] | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    max_tokens: int | None = None
 
 
 class MessageRequest(BaseModel):
     task: str
     tenant_id: str = "default"
     offline: bool = False
+    memory: bool = True
+    guardrails: bool = True
+    single: bool = False
+    llm_composer: bool = False
+    critic: bool = False
+    supervisor: bool = False
+    react_steps: int = 1
+    vote_k: int = 1
+    temperature: float | None = None
+    top_p: float | None = None
+    max_tokens: int | None = None
 
 
 class EvalRequest(BaseModel):
@@ -198,6 +225,7 @@ def create_app() -> FastAPI:
                 react_steps=req.react_steps,
                 vote_k=req.vote_k,
                 final_schema=req.final_schema,
+                sampling=_sampling(req.temperature, req.top_p, req.max_tokens),
             )
         except BudgetExceeded as exc:
             raise HTTPException(status_code=402, detail=str(exc)) from exc
@@ -232,23 +260,59 @@ def create_app() -> FastAPI:
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
+    def _message_run_kwargs(session_id: str, req: MessageRequest) -> dict[str, Any]:
+        return dict(
+            tenant_id=req.tenant_id, offline=req.offline, memory_on=req.memory,
+            guardrails_on=req.guardrails, single=req.single, llm_composer=req.llm_composer,
+            critic=req.critic, supervisor=req.supervisor, react_steps=req.react_steps,
+            vote_k=req.vote_k, sampling=_sampling(req.temperature, req.top_p, req.max_tokens),
+            history=_sessions.history(session_id),
+        )
+
     @app.post("/sessions/{session_id}/messages", response_model=RunResult)
     def post_message(session_id: str, req: MessageRequest) -> RunResult:
         try:
-            result = run_task(
-                req.task,
-                tenant_id=req.tenant_id,
-                offline=req.offline,
-                history=_sessions.history(session_id),
-            )
+            result = run_task(req.task, **_message_run_kwargs(session_id, req))
         except BudgetExceeded as exc:
             raise HTTPException(status_code=402, detail=str(exc)) from exc
-        _sessions.append(session_id, req.task, result.final_answer or "")
+        _sessions.append(session_id, req.task, result)
         return result
+
+    @app.get("/api/sessions/{session_id}/messages/stream")
+    def stream_message(session_id: str, task: str, tenant_id: str = "default",
+                       offline: bool = True, memory: bool = True, guardrails: bool = True,
+                       single: bool = False, llm_composer: bool = False, critic: bool = False,
+                       supervisor: bool = False, react_steps: int = 1, vote_k: int = 1,
+                       temperature: float | None = None, top_p: float | None = None,
+                       max_tokens: int | None = None):
+        def gen():
+            try:
+                stream = stream_task(
+                    task, tenant_id=tenant_id, offline=offline, memory_on=memory,
+                    guardrails_on=guardrails, single=single, llm_composer=llm_composer,
+                    critic=critic, supervisor=supervisor, react_steps=react_steps, vote_k=vote_k,
+                    sampling=_sampling(temperature, top_p, max_tokens),
+                    history=_sessions.history(session_id),
+                )
+                for kind, payload in stream:
+                    if kind == "node":
+                        yield _sse({"event": "node", "name": payload})
+                    else:
+                        _sessions.append(session_id, task, payload)
+                        yield _sse({"event": "result", "result": payload.model_dump()})
+            except BudgetExceeded as exc:
+                yield _sse({"event": "error", "detail": str(exc)})
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
 
     @app.get("/sessions/{session_id}")
     def get_session(session_id: str) -> dict:
         return {"session_id": session_id, "turns": _sessions.turns(session_id)}
+
+    @app.delete("/sessions/{session_id}")
+    def delete_session(session_id: str) -> dict:
+        _sessions.clear(session_id)
+        return {"status": "cleared", "session_id": session_id}
 
     # --- Studio data endpoints (read-only, offline-safe) ---
 

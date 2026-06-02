@@ -207,6 +207,29 @@ The swarm runs **specialist** agents, not generic workers:
 See [`test_roles.py`](tests/test_roles.py), [`test_critic.py`](tests/test_critic.py),
 [`test_supervisor.py`](tests/test_supervisor.py), [`test_handoff.py`](tests/test_handoff.py).
 
+### Smarter individual agents (ReAct, voting, structured output, clarify)
+
+Each worker can do more than a single shot. Every capability below is **gated by a default
+that reduces exactly to the prior single-shot behavior**, so it is purely opt-in:
+
+- **Iterative tool use / ReAct** (`build_graph(max_steps=N)`, CLI `--react N`) — the worker
+  loops *think → act → observe*: it calls a read-only tool, feeds the result back into the
+  conversation, and reasons again, up to `max_steps` (default `1` == single-shot).
+  Side-effecting tools still defer to the human-approval gate (executed once, never repeated).
+- **Self-consistency / voting** (`build_graph(vote_k=K)`, CLI `--vote K`) — for *direct*
+  answers the worker samples `K` times and majority-votes the result (default `1` == no
+  voting). If any sample requests a tool, voting is abandoned so tools/side-effects run once.
+- **Structured outputs** (`build_graph(final_schema=…)`, CLI `--schema PATH`) — finalize also
+  emits a JSON object validated against a JSON Schema (one retry on failure), surfaced as
+  `RunResult.structured` / `state["structured_output"]`; the plain-text answer is unaffected.
+- **Clarifying questions (HITL)** — a worker can emit an `ask_human(question)` call to
+  **pause and ask the operator** when a subtask is ambiguous; the graph `interrupt()`s,
+  resumes with `Command(resume={"answer": …})`, injects the answer into the subtask, and
+  re-runs it (capped at one question per subtask). Headless callers auto-proceed.
+
+See [`test_react.py`](tests/test_react.py), [`test_voting.py`](tests/test_voting.py),
+[`test_structured.py`](tests/test_structured.py), [`test_clarify.py`](tests/test_clarify.py).
+
 ## Production hardening (Stage 4)
 
 Guardrails wrap the graph: a **`guard_input`** node blocks prompt-injection attempts and

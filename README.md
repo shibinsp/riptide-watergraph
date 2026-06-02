@@ -62,9 +62,23 @@ graph collapses to the Stage-1 spine (`orchestrator → worker → finalize`). `
 appear with memory, `guard_input`/`guard_output` with guardrails, and `swarm_worker` when the
 composer chooses a swarm.
 
-## Quickstart
+## Install
 
 Prerequisites: Python 3.11+. No compiler or other toolchain needed.
+
+```bash
+# From PyPI (once a vX.Y.Z tag is published — see "Releasing" below):
+pip install riptide-watergraph            # core
+pip install "riptide-watergraph[server]"  # + Studio web UI (riptide serve)
+pip install "riptide-watergraph[all]"      # + LiteLLM, MCP, observability
+
+# From GitHub (works today, before a PyPI release):
+pip install "git+https://github.com/shibinsp/riptide-watergraph.git#egg=riptide-watergraph[server]"
+```
+
+> The package name is **`riptide-watergraph`** (import `riptide_watergraph`). `pip install watergraph` is not it.
+
+## Quickstart
 
 ```bash
 # 1. Install (editable) with dev deps
@@ -371,6 +385,31 @@ The runner uses the configured model wrapped in `ResilientGateway` (timeouts + r
 - **Smarter orchestration ✅** — LLM-driven composer (subtasks + dependencies), dependency-ordered wave execution with a shared blackboard, and per-role model routing (planner vs worker).
 - **Serve as a product ✅** — FastAPI service (`riptide serve`) with `POST /run`, SSE `/run/stream`, multi-turn session endpoints, and per-tenant budget enforcement (HTTP 402 when a tenant is over its ceiling).
 - **Optional infra seams** — swap `SqliteSaver` → Temporal for multi-day durable workflows; `JsonFileMemory` → pgvector and the gateway → vLLM/SGLang at scale; add LlamaFirewall / NeMo Guardrails alongside the built-in checks.
+
+## Releasing to PyPI
+
+Publishing is automated via `.github/workflows/publish.yml` (builds + uploads on a `vX.Y.Z` tag
+using **PyPI Trusted Publishing** — no token stored in the repo).
+
+**One-time setup (maintainer):** create the `riptide-watergraph` project on
+[PyPI](https://pypi.org) and add a Trusted Publisher (PyPI → project → *Publishing* → GitHub
+Actions: owner `shibinsp`, repo `riptide-watergraph`, workflow `publish.yml`, environment `pypi`).
+
+**Each release:** bump `version` in `pyproject.toml` + `__version__` in `src/riptide_watergraph/__init__.py`,
+update `CHANGELOG.md`, then:
+
+```bash
+git tag v0.9.0 && git push origin v0.9.0   # the Action builds + publishes
+```
+
+After the first successful publish, `pip install riptide-watergraph` works for everyone.
+
+## Monitoring
+
+`riptide serve` → **Monitoring** aggregates the per-run usage log (`.riptide_watergraph/usage.jsonl`)
+into KPI cards (runs, success rate, avg latency, tokens, cost, tool-call validity, blocked), a
+runs/cost-over-time chart, and a recent-runs table — served by `GET /api/monitoring`. Deeper tracing
+(per-LLM-call spans) is available via the optional `[observability]` extra (OpenTelemetry + Langfuse).
 
 ## License
 

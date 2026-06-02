@@ -50,6 +50,7 @@ class GraphContext:
     guardrails: GuardrailPipeline | None = None  # Stage 4: input/output safety
     max_rounds: int = 2  # supervisor re-planning cap (rounds incl. the first)
     max_handoffs: int = 1  # per-subtask agent-to-agent handoff cap
+    max_steps: int = 1  # ReAct think->act->observe steps per subtask (1 = single-shot)
 
     def __post_init__(self) -> None:
         # Per-role models default to the single configured model.
@@ -158,6 +159,38 @@ def _maybe_handoff(
     return {"roles": roles, "handoffs": handoffs}
 
 
+def _clarified(state: OrchestratorState, cursor: int, subtask: str) -> str:
+    """Append any human clarification answer for this subtask to its prompt."""
+    answer = (state.get("clarifications") or {}).get(str(cursor))
+    return f"{subtask}\n\n(Human clarification: {answer})" if answer else subtask
+
+
+def _maybe_clarify(
+    state: OrchestratorState, cursor: int, subtask: str, result: Any
+) -> dict[str, Any] | None:
+    """If the worker emitted ``ask_human``, route to the clarification interrupt (once)."""
+    if not result.tool_calls:
+        return None
+    fn = result.tool_calls[0].get("function") or {}
+    if fn.get("name") != "ask_human":
+        return None
+    if str(cursor) in (state.get("clarifications") or {}):
+        return None  # already answered — don't ask again
+    try:
+        args = json.loads(fn.get("arguments", "{}"))
+    except (json.JSONDecodeError, TypeError):
+        args = {}
+    question = str(args.get("question") or "Could you clarify this subtask?")
+    return {
+        "pending_action": {
+            "type": "clarification",
+            "question": question,
+            "subtask": subtask,
+            "cursor": cursor,
+        }
+    }
+
+
 def _parse_tool_call(
     ctx: GraphContext, call: dict[str, Any]
 ) -> tuple[str | None, str, dict[str, Any], bool, str | None]:
@@ -263,76 +296,91 @@ def make_worker(ctx: GraphContext):
         subtask = plan[cursor]
         role = get_role((state.get("roles") or ["generalist"] * len(plan))[cursor])
         with span("worker", subtask=subtask, cursor=cursor, role=role.name):
-            sys = Message(role="system", content=_lessons_block(state) + role.system_prompt)
-            usr = Message(role="user", content=subtask)
-            # On-demand tool retrieval, scoped to the role's allowed tools. The handoff
-            # pseudo-tool is always offered so the agent can delegate to a specialist.
             allowed = set(role.tools) if role.tools is not None else None
             specs = _run(ctx.registry.retrieve(subtask, k=ctx.tool_k, allowed=allowed))
             tools = [s.to_openai_schema() for s in specs] + [_HANDOFF_SCHEMA]
-            result = _run(
-                ctx.gateway.complete(
-                    model=ctx.worker_model, messages=[sys, usr], tools=tools
+            # ReAct loop: think -> act -> observe, up to max_steps (1 == single-shot).
+            messages = [
+                Message(role="system", content=_lessons_block(state) + role.system_prompt),
+                Message(role="user", content=_clarified(state, cursor, subtask)),
+            ]
+            last_step = ctx.max_steps - 1
+            for step in range(ctx.max_steps):
+                result = _run(
+                    ctx.gateway.complete(
+                        model=ctx.worker_model, messages=messages, tools=tools
+                    )
                 )
-            )
-            _add_usage(metrics, result)
+                _add_usage(metrics, result)
 
-            # Agent-to-agent handoff: re-assign the role and re-run this subtask once.
-            handoff = _maybe_handoff(state, cursor, result, ctx.max_handoffs)
-            if handoff is not None:
-                handoff["metrics"] = metrics
-                return handoff
+                # Agent-to-agent handoff / clarification re-route the subtask.
+                handoff = _maybe_handoff(state, cursor, result, ctx.max_handoffs)
+                if handoff is not None:
+                    handoff["metrics"] = metrics
+                    return handoff
+                clarify = _maybe_clarify(state, cursor, subtask, result)
+                if clarify is not None:
+                    clarify["metrics"] = metrics
+                    return clarify
 
-            if not result.tool_calls:
-                # Direct answer — record and advance.
-                out: WorkerResult = {
-                    "subtask": subtask,
-                    "output": result.content or "",
-                    "tool_calls": [],
-                }
-                return {"results": [out], "cursor": cursor + 1, "metrics": metrics}
-
-            # Take the first tool call (skeleton handles one per subtask).
-            call = result.tool_calls[0]
-            call_id, name, arguments, valid, reason = _parse_tool_call(ctx, call)
-
-            metrics["tool_calls_total"] += 1
-            if valid:
-                metrics["tool_calls_valid"] += 1
-            elif reason in metrics["failures"]:
-                metrics["failures"][reason] += 1
-
-            if not valid:
-                out = {
-                    "subtask": subtask,
-                    "output": f"invalid tool call ({reason}) for {name!r}",
-                    "tool_calls": [call],
-                }
-                return {"results": [out], "cursor": cursor + 1, "metrics": metrics}
-
-            spec = ctx.registry.get(name)
-            if spec.side_effecting:
-                # Defer execution to AFTER approval (idempotency). Route to HITL.
-                return {
-                    "pending_action": {
-                        "tool": name,
-                        "arguments": arguments,
+                if not result.tool_calls:
+                    out: WorkerResult = {
                         "subtask": subtask,
-                        "cursor": cursor,
-                        "call_id": call_id,
-                    },
-                    "metrics": metrics,
-                }
+                        "output": result.content or "",
+                        "tool_calls": [],
+                    }
+                    return {"results": [out], "cursor": cursor + 1, "metrics": metrics}
 
-            # Read-only tool: execute inline (errors isolated, not crashing the run).
-            out = {
-                "subtask": subtask,
-                "output": _safe_invoke(ctx, name, arguments),
-                "tool_calls": [call],
-            }
-            return {"results": [out], "cursor": cursor + 1, "metrics": metrics}
+                call = result.tool_calls[0]
+                call_id, name, arguments, valid, reason = _parse_tool_call(ctx, call)
+                metrics["tool_calls_total"] += 1
+                if valid:
+                    metrics["tool_calls_valid"] += 1
+                elif reason in metrics["failures"]:
+                    metrics["failures"][reason] += 1
+
+                if not valid:
+                    if step < last_step:  # let the model self-correct next step
+                        _observe(messages, call, call_id, f"invalid tool call ({reason})")
+                        continue
+                    out = {
+                        "subtask": subtask,
+                        "output": f"invalid tool call ({reason}) for {name!r}",
+                        "tool_calls": [call],
+                    }
+                    return {"results": [out], "cursor": cursor + 1, "metrics": metrics}
+
+                if ctx.registry.get(name).side_effecting:
+                    # Defer execution to AFTER approval (idempotency). Ends the loop.
+                    return {
+                        "pending_action": {
+                            "tool": name, "arguments": arguments,
+                            "subtask": subtask, "cursor": cursor, "call_id": call_id,
+                        },
+                        "metrics": metrics,
+                    }
+
+                # Read-only tool: execute (errors isolated). Observe and continue.
+                observation = _safe_invoke(ctx, name, arguments)
+                if step < last_step:
+                    _observe(messages, call, call_id, observation)
+                    continue
+                out = {"subtask": subtask, "output": observation, "tool_calls": [call]}
+                return {"results": [out], "cursor": cursor + 1, "metrics": metrics}
+
+            return {}  # unreachable; loop always returns above
 
     return worker
+
+
+def _observe(messages: list[Message], call: dict[str, Any], call_id: str | None,
+             observation: str) -> None:
+    """Append the assistant tool-call + tool observation so the next step sees it."""
+    messages.append(Message(role="assistant", content=None, tool_calls=[call]))
+    messages.append(
+        Message(role="tool", tool_call_id=call_id,
+                name=(call.get("function") or {}).get("name"), content=observation)
+    )
 
 
 def make_swarm_worker(ctx: GraphContext):

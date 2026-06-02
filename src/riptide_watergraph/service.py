@@ -8,6 +8,7 @@ context is supported via an in-process ``SessionStore``.
 
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -213,6 +214,7 @@ def run_task(
             final_schema=final_schema,
             sampling=sampling,
         )
+        _t0 = time.perf_counter()
         state = graph.invoke(
             {"task": _with_history(task, history), "session_id": thread_id,
              "tenant_id": tenant_id},
@@ -229,7 +231,8 @@ def run_task(
                 resume = {"approved": True}
             state = graph.invoke(Command(resume=resume), config)
 
-        _record_usage(settings, tenant_id, task, state)
+        _record_usage(settings, tenant_id, task, state,
+                      latency_ms=int((time.perf_counter() - _t0) * 1000))
 
     return _result_from_state(tenant_id, state)
 
@@ -305,6 +308,7 @@ def stream_task(
         pending: Any = {"task": _with_history(task, history),
                         "session_id": config["configurable"]["thread_id"],
                         "tenant_id": tenant_id}
+        _t0 = time.perf_counter()
         for _ in range(50):  # bounded: re-stream after each auto-approved interrupt
             for chunk in graph.stream(pending, config, stream_mode="updates"):
                 for node_name in chunk:
@@ -320,7 +324,8 @@ def stream_task(
             else:
                 pending = Command(resume={"approved": True})
         final = dict(graph.get_state(config).values)
-        _record_usage(settings, tenant_id, task, final)
+        _record_usage(settings, tenant_id, task, final,
+                      latency_ms=int((time.perf_counter() - _t0) * 1000))
     yield ("result", _result_from_state(tenant_id, final))
 
 
@@ -377,8 +382,10 @@ def stream_workflow(
     )
 
 
-def _record_usage(settings: Settings, tenant_id: str, task: str, state: dict) -> None:
+def _record_usage(settings: Settings, tenant_id: str, task: str, state: dict,
+                  latency_ms: int = 0) -> None:
     decision = state.get("swarm_decision") or {}
+    metrics = state.get("metrics") or {}
     blob = (
         task
         + " ".join(r.get("output", "") for r in (state.get("results") or []))
@@ -400,6 +407,12 @@ def _record_usage(settings: Settings, tenant_id: str, task: str, state: dict) ->
             actual_tokens=actual,
             cost_usd=cost,
             blocked=bool(state.get("blocked")),
+            ts=time.time(),
+            latency_ms=latency_ms,
+            success=state.get("success"),
+            tool_calls_total=int(metrics.get("tool_calls_total", 0) or 0),
+            tool_calls_valid=int(metrics.get("tool_calls_valid", 0) or 0),
+            n_subtasks=len(state.get("plan") or []),
         )
     )
 

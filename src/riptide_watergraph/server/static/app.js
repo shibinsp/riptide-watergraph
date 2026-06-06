@@ -602,7 +602,11 @@ VIEWS.chat = function () {
       el("div", null, el("label", { class: "lbl" }, "ReAct steps"),
         el("input", { type: "number", id: "c-react", class: "num", min: "1", value: "1" })),
       el("div", null, el("label", { class: "lbl" }, "Vote k"),
-        el("input", { type: "number", id: "c-vote", class: "num", min: "1", value: "1" }))));
+        el("input", { type: "number", id: "c-vote", class: "num", min: "1", value: "1" }))),
+    el("label", { class: "lbl", style: "margin-top:16px" }, "Advanced"),
+    el("div", { class: "switches", style: "margin-top:4px" },
+      knob("c-token-stream", "Direct token stream", false),
+      knob("c-interactive", "Ask before running tools", false)));
 
   const messages = el("div", { class: "chat-log", id: "chat-log" });
   const input = el("textarea", { id: "chat-input", class: "chat-input", placeholder: "Message the agents…" });
@@ -663,27 +667,124 @@ VIEWS.chat = function () {
     });
   }
   function stop() { if (activeES) { activeES.close(); activeES = null; } sendBtn.disabled = false; stopBtn.disabled = true; }
+
+  // Helper: render an interactive HITL approval card in the message thread.
+  function showApprovalCard(pending, task) {
+    const a = pending.action || {};
+    const card = el("div", { class: "approval-card" },
+      el("div", { class: "approval-header" },
+        el("span", { class: "badge warn" }, "Approval required"),
+        el("strong", null, " " + (a.tool || "side-effecting action"))),
+      el("div", { class: "approval-body" },
+        a.subtask ? el("div", null, el("span", { class: "muted" }, "Subtask: "), a.subtask) : null,
+        a.arguments ? el("pre", null, JSON.stringify(a.arguments, null, 2)) : null),
+      el("div", { class: "approval-actions" },
+        el("button", { class: "btn primary", onclick: () => resume(pending.thread_id, true, task, card) }, "Approve"),
+        el("button", { class: "btn", onclick: () => resume(pending.thread_id, false, task, card) }, "Deny")));
+    messages.appendChild(bubble("agent", card, { agent: "approval gate", ts: nowTime() }));
+    autoscroll();
+    sendBtn.disabled = false; stopBtn.disabled = true;
+  }
+
+  // Resume an interactive run after approval/denial; loop until done.
+  async function resume(threadId, approved, task, prevCard) {
+    prevCard.parentElement && prevCard.parentElement.remove(); // remove the approval bubble
+    const p = params(task);
+    p.task = task;  // keep the original task for usage logging
+    sendBtn.disabled = true; stopBtn.disabled = true;
+    try {
+      const result = await jpost("/api/run/" + encodeURIComponent(threadId) + "/resume",
+                                 { approved, answer: null, task });
+      if (result.status === "pending_approval") {
+        showApprovalCard(result, task);
+      } else {
+        addAssistant(result, nowTime());
+        sendBtn.disabled = false;
+      }
+    } catch (e) {
+      messages.appendChild(bubble("agent", el("div", { class: "error" }, e.message)));
+      sendBtn.disabled = false;
+    }
+    stopBtn.disabled = true;
+  }
+
   function send() {
     const task = input.value.trim();
     if (!task) return;
     lastTask = task; input.value = "";
     const es0 = messages.querySelector(".chat-empty"); if (es0) es0.remove();
     messages.appendChild(bubble("user", el("div", null, task), { ts: nowTime() }));
-    const steps = el("span", { class: "pills" });
-    const thinking = el("div", null, el("span", { class: "spinner" }), steps);
-    const thinkBubble = bubble("agent", thinking, { agent: "thinking…" });
-    messages.appendChild(thinkBubble); autoscroll();
     sendBtn.disabled = true; stopBtn.disabled = false;
-    const qs = new URLSearchParams(params(task));
-    const es = new EventSource("/api/sessions/" + encodeURIComponent(activeId) + "/messages/stream?" + qs.toString());
-    activeES = es;
-    es.onmessage = (e) => {
-      const m = JSON.parse(e.data);
-      if (m.event === "node") { steps.appendChild(el("span", { class: "chip" }, m.name)); autoscroll(); }
-      else if (m.event === "result") { es.close(); activeES = null; thinkBubble.remove(); addAssistant(m.result, nowTime()); sendBtn.disabled = false; stopBtn.disabled = true; }
-      else if (m.event === "error") { es.close(); activeES = null; thinkBubble.remove(); messages.appendChild(bubble("agent", el("div", { class: "error" }, [].concat(m.detail).join(", ")))); sendBtn.disabled = false; stopBtn.disabled = true; }
-    };
-    es.onerror = () => { es.close(); activeES = null; sendBtn.disabled = false; stopBtn.disabled = true; };
+
+    const tokenStream = document.getElementById("c-token-stream") && document.getElementById("c-token-stream").checked;
+    const interactive = document.getElementById("c-interactive") && document.getElementById("c-interactive").checked;
+
+    if (tokenStream) {
+      // --- Direct token-streaming mode ---
+      const p = params(task);
+      const qs = new URLSearchParams({ message: task, session_id: activeId,
+        offline: p.offline, temperature: p.temperature });
+      if (p.top_p != null) qs.set("top_p", p.top_p);
+      if (p.max_tokens != null) qs.set("max_tokens", p.max_tokens);
+      const answerDiv = el("div", null);
+      let cursor = el("span", { class: "stream-cursor" });
+      answerDiv.appendChild(cursor);
+      messages.appendChild(bubble("agent", answerDiv, { agent: "agent", ts: nowTime() }));
+      autoscroll();
+      const es = new EventSource("/api/chat/stream?" + qs.toString());
+      activeES = es;
+      es.onmessage = (e) => {
+        const m = JSON.parse(e.data);
+        if (m.event === "token") {
+          cursor.remove();
+          answerDiv.appendChild(document.createTextNode(m.text));
+          answerDiv.appendChild(cursor);
+          autoscroll();
+        } else if (m.event === "done" || m.event === "error") {
+          cursor.remove();
+          es.close(); activeES = null; sendBtn.disabled = false; stopBtn.disabled = true;
+          if (m.event === "error") answerDiv.appendChild(el("span", { class: "error" }, " [error]"));
+        }
+      };
+      es.onerror = () => { cursor.remove(); es.close(); activeES = null; sendBtn.disabled = false; stopBtn.disabled = true; };
+
+    } else if (interactive) {
+      // --- Interactive HITL mode ---
+      const p = params(task);
+      const steps = el("span", { class: "pills" });
+      const thinkBubble = bubble("agent", el("div", null, el("span", { class: "spinner" }), steps), { agent: "thinking…" });
+      messages.appendChild(thinkBubble); autoscroll();
+      jpost("/api/run/interactive", p).then((result) => {
+        thinkBubble.remove();
+        if (result.status === "pending_approval") {
+          showApprovalCard(result, task);
+        } else {
+          addAssistant(result, nowTime());
+          sendBtn.disabled = false; stopBtn.disabled = true;
+        }
+      }).catch((e) => {
+        thinkBubble.remove();
+        messages.appendChild(bubble("agent", el("div", { class: "error" }, e.message)));
+        sendBtn.disabled = false; stopBtn.disabled = true;
+      });
+
+    } else {
+      // --- Normal graph-streaming mode (existing behaviour) ---
+      const steps = el("span", { class: "pills" });
+      const thinking = el("div", null, el("span", { class: "spinner" }), steps);
+      const thinkBubble = bubble("agent", thinking, { agent: "thinking…" });
+      messages.appendChild(thinkBubble); autoscroll();
+      const qs = new URLSearchParams(params(task));
+      const es = new EventSource("/api/sessions/" + encodeURIComponent(activeId) + "/messages/stream?" + qs.toString());
+      activeES = es;
+      es.onmessage = (e) => {
+        const m = JSON.parse(e.data);
+        if (m.event === "node") { steps.appendChild(el("span", { class: "chip" }, m.name)); autoscroll(); }
+        else if (m.event === "result") { es.close(); activeES = null; thinkBubble.remove(); addAssistant(m.result, nowTime()); sendBtn.disabled = false; stopBtn.disabled = true; }
+        else if (m.event === "error") { es.close(); activeES = null; thinkBubble.remove(); messages.appendChild(bubble("agent", el("div", { class: "error" }, [].concat(m.detail).join(", ")))); sendBtn.disabled = false; stopBtn.disabled = true; }
+      };
+      es.onerror = () => { es.close(); activeES = null; sendBtn.disabled = false; stopBtn.disabled = true; };
+    }
   }
   sendBtn.onclick = send;
   input.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };

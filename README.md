@@ -188,6 +188,18 @@ Backed by JSON endpoints — `GET /api/meta`, `/api/tools`, `/api/roles`, `/api/
 `/run`, `/run/stream` (SSE), and `/sessions/*`. HITL is **auto-approve** in the Studio (headless); use the
 CLI for interactive approval/clarification prompts.
 
+**OpenAI-compatible API.** `riptide serve` also exposes `POST /v1/chat/completions` (non-stream + SSE), so
+any OpenAI SDK / LangChain / OpenWebUI client can point at `<base>/v1` and the full agentic graph answers:
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="not-needed")
+print(client.chat.completions.create(
+    model="riptide-watergraph",
+    messages=[{"role": "user", "content": "What is 21 * 2?"}],
+).choices[0].message.content)
+```
+
 > **Security:** the Studio API is unauthenticated and binds `127.0.0.1` by default — don't expose it
 > publicly. API keys stay in memory and masked. Powerful tool packs are **off by default** and only enabled
 > by starting the server with the matching flag: `RIPTIDE_ENABLE_EXEC=1` (code execution),

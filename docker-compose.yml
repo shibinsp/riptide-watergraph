@@ -1,0 +1,29 @@
+# Run the Like Water Studio with a persistent data volume.
+#   docker compose up --build      # then open http://localhost:8000/
+#
+# Memory + the usage log live under DATA_DIR (the named volume below), so they
+# survive container restarts. For a real model, set OPENAI_API_KEY and
+# RIPTIDE_WATERGRAPH_MODEL in your shell or a .env file next to this compose file.
+services:
+  studio:
+    build: .
+    image: riptide-watergraph
+    ports:
+      - "8000:8000"
+    environment:
+      # Tracing is opt-in; off by default.
+      RIPTIDE_WATERGRAPH_DISABLE_TRACING: "1"
+      # Persist memory + usage under the mounted volume.
+      DATA_DIR: "/data"
+      CHECKPOINT_PATH: "/data/checkpoints.sqlite"
+      MEMORY_PATH: "/data/memory.json"
+      WORKSPACE_DIR: "/data/workspace"
+      # For a real model, uncomment and provide via your shell / .env:
+      # OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      # RIPTIDE_WATERGRAPH_MODEL: "gpt-4o-mini"
+    volumes:
+      - riptide-data:/data
+    restart: unless-stopped
+
+volumes:
+  riptide-data:

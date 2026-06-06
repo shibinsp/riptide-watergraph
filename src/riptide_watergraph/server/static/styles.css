@@ -271,6 +271,18 @@ tbody tr:hover td { background: var(--surface-2); }
 .composer-left .btn { background: transparent; border-color: transparent; color: var(--ink-2); font-weight: 500; padding: 6px 10px; }
 .composer-left .btn:hover { background: var(--surface-2); color: var(--ink); }
 .composer-hint { font-size: 11px; color: var(--ink-2); text-align: right; padding-right: 2px; }
+
+/* Token streaming cursor */
+.stream-cursor { display: inline-block; width: 2px; height: 1em; vertical-align: -2px;
+  background: var(--accent); margin-left: 1px; animation: blink .8s step-start infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* Interactive HITL approval card */
+.approval-card { display: flex; flex-direction: column; gap: 10px; }
+.approval-header { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.approval-body { font-size: 13px; }
+.approval-body pre { margin: 4px 0 0; max-height: 120px; overflow-y: auto; }
+.approval-actions { display: flex; gap: 8px; }
 /* empty state */
 .chat-empty { margin: auto; text-align: center; max-width: 560px; padding: 28px; }
 .chat-empty-logo { margin: 0 auto 10px; font-size: 52px; line-height: 1; }

@@ -3,7 +3,7 @@
 Setup:
     pip install -e ".[all]"
     export OPENAI_API_KEY=sk-...
-    export AGENTIC_WATER_MODEL=gpt-4o-mini      # any LiteLLM model string
+    export RIPTIDE_WATERGRAPH_MODEL=gpt-4o-mini      # any LiteLLM model string
 
 Run: python examples/real_model_eval.py     (or: riptide eval)
 """
@@ -15,7 +15,7 @@ from riptide_watergraph.evaluation import EvalRunner
 
 def main() -> None:
     # offline=False routes through LiteLLM (wrapped in ResilientGateway) using the
-    # model from settings (AGENTIC_WATER_MODEL).
+    # model from settings (RIPTIDE_WATERGRAPH_MODEL).
     report = EvalRunner(offline=False).run()
     print(f"pass rate: {report.n_passed}/{report.n_total} = {report.pass_rate:.0%}")
     print(f"routing: {report.modes}; blocked: {report.blocked}; "

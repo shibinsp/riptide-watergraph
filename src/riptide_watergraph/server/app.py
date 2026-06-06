@@ -47,10 +47,14 @@ from ..interfaces.gateway import Message
 from ..mcp import McpClient, register_mcp_tools
 from ..observability.cost import BudgetExceeded, CostTracker, TenantTotals, _PRICE_PER_1K
 from ..service import (
+    PendingApproval,  # noqa: F401 - returned dynamically by run_interactive/resume_interactive
     RunResult,
     SessionStore,
+    resume_interactive,
+    run_interactive,
     run_task,
     run_workflow,
+    stream_chat_tokens,
     stream_task,
     stream_workflow,
 )
@@ -59,7 +63,7 @@ from ..tools import default_registry, register_dynamic_spec, remove_dynamic_spec
 from ..tools.registry import StaticToolRegistry, ToolValidationError
 from ..workflows import WorkflowSpec, WorkflowStore, WorkflowValidationError, validate_spec
 
-_VERSION = "0.10.0"
+_VERSION = "0.11.0"
 _STATIC = Path(__file__).parent / "static"
 _sessions = SessionStore()
 _workflows = WorkflowStore()
@@ -233,6 +237,12 @@ class McpConnectRequest(BaseModel):
 class McpConnectResult(BaseModel):
     name: str
     tools: list[str]
+
+
+class ResumeRequest(BaseModel):
+    approved: bool = True
+    answer: str | None = None   # for clarification interrupts
+    task: str = ""              # original task (for usage logging)
 
 
 class MetaResponse(BaseModel):
@@ -565,6 +575,88 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001 - report any failure, never crash
             return ConnectionTestResult(ok=False, model=model, latency_ms=0,
                                         detail=f"{type(exc).__name__}: {exc}")
+
+    # --- Real token streaming (direct, no graph) ---
+
+    @app.get("/api/chat/stream")
+    def api_chat_stream(
+        message: str,
+        session_id: str = "default",
+        tenant_id: str = "default",
+        offline: bool = True,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        max_tokens: int | None = None,
+    ):
+        """Stream real token deltas for a single-agent, tool-free chat turn.
+
+        Emits ``{event:"token", text:"..."}`` per delta then ``{event:"done"}``.
+        The offline ``DemoGateway`` yields the full answer in one token event.
+        For multi-agent graph runs with tracing, use ``/api/sessions/{id}/messages/stream``.
+        """
+        history = _sessions.history(session_id) if session_id != "default" else None
+        sampling = _sampling(temperature, top_p, max_tokens)
+
+        async def gen():
+            try:
+                async for chunk in stream_chat_tokens(
+                    message,
+                    history=history,
+                    sampling=sampling or {},
+                    tenant_id=tenant_id,
+                    offline=offline,
+                ):
+                    yield _sse({"event": "token", "text": chunk})
+            except Exception as exc:  # noqa: BLE001
+                yield _sse({"event": "error", "detail": str(exc)})
+            yield _sse({"event": "done"})
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    # --- Interactive HITL (approve/deny side-effecting tools from the browser) ---
+
+    @app.post("/api/run/interactive")
+    def api_run_interactive(req: RunRequest):
+        """Run with auto_approve=False.  Returns either a full RunResult or a
+        PendingApproval JSON when the graph pauses at a side-effecting tool.
+        The caller should render an approval card and POST to /api/run/{tid}/resume.
+        """
+        try:
+            result = run_interactive(
+                req.task,
+                tenant_id=req.tenant_id,
+                offline=req.offline,
+                memory_on=req.memory,
+                single=req.single,
+                guardrails_on=req.guardrails,
+                llm_composer=req.llm_composer,
+                critic=req.critic,
+                supervisor=req.supervisor,
+                react_steps=req.react_steps,
+                vote_k=req.vote_k,
+                final_schema=req.final_schema,
+                sampling=_sampling(req.temperature, req.top_p, req.max_tokens),
+            )
+        except BudgetExceeded as exc:
+            raise HTTPException(status_code=402, detail=str(exc)) from exc
+        return result  # either RunResult or PendingApproval — both are dicts
+
+    @app.post("/api/run/{thread_id}/resume")
+    def api_resume_interactive(thread_id: str, req: ResumeRequest):
+        """Resume an interrupted run after the operator approves/denies the action."""
+        try:
+            result = resume_interactive(
+                thread_id,
+                approved=req.approved,
+                answer=req.answer,
+                task=req.task,
+            )
+        except BudgetExceeded as exc:
+            raise HTTPException(status_code=402, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400,
+                                detail=f"{type(exc).__name__}: {exc}") from exc
+        return result
 
     # --- MCP connect (gated + allowlisted): make connector tools real ---
 

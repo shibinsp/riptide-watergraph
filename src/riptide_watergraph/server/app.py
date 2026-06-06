@@ -19,6 +19,7 @@ Endpoints:
 - ``POST /api/connection/test``      — ping the configured gateway to validate the connection.
 - ``GET/POST/DELETE /api/workflows`` — CRUD for saved visual workflow specs.
 - ``POST /api/workflows/run`` + ``GET /api/workflows/run/stream`` — run a workflow DAG (SSE).
+- ``POST /v1/chat/completions``       — OpenAI-compatible chat completions (non-stream + SSE).
 
 Endpoints are sync ``def`` on purpose: the graph runs synchronously (each node drives
 async work via ``asyncio.run``), so FastAPI executes them in its threadpool where a fresh
@@ -32,6 +33,7 @@ import json
 import os
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Literal
 
@@ -63,7 +65,7 @@ from ..tools import default_registry, register_dynamic_spec, remove_dynamic_spec
 from ..tools.registry import StaticToolRegistry, ToolValidationError
 from ..workflows import WorkflowSpec, WorkflowStore, WorkflowValidationError, validate_spec
 
-_VERSION = "0.13.0"
+_VERSION = "0.14.0"
 _STATIC = Path(__file__).parent / "static"
 _sessions = SessionStore()
 _workflows = WorkflowStore()
@@ -245,6 +247,27 @@ class ResumeRequest(BaseModel):
     task: str = ""              # original task (for usage logging)
 
 
+class ChatMessage(BaseModel):
+    """One message in an OpenAI-compatible chat-completions request."""
+
+    role: str = "user"
+    content: str = ""
+
+
+class ChatCompletionRequest(BaseModel):
+    """A useful subset of the OpenAI ``/v1/chat/completions`` request schema."""
+
+    messages: list[ChatMessage]
+    model: str = "riptide-watergraph"
+    stream: bool = False
+    temperature: float | None = None
+    top_p: float | None = None
+    max_tokens: int | None = None
+    tenant_id: str | None = None
+    # Extension (not in the OpenAI schema): run with the deterministic offline gateway.
+    offline: bool = False
+
+
 class MetaResponse(BaseModel):
     version: str
     defaults: dict[str, Any]
@@ -261,6 +284,15 @@ class MetaResponse(BaseModel):
 
 def _sse(obj: dict) -> str:
     return f"data: {json.dumps(obj)}\n\n"
+
+
+def _chat_chunk(cid: str, created: int, model: str, *, delta: dict,
+                finish_reason: str | None = None) -> dict:
+    """One OpenAI ``chat.completion.chunk`` for the streaming /v1 endpoint."""
+    return {
+        "id": cid, "object": "chat.completion.chunk", "created": created, "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+    }
 
 
 def _mask(key: str) -> str | None:
@@ -657,6 +689,65 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400,
                                 detail=f"{type(exc).__name__}: {exc}") from exc
         return result
+
+    # --- OpenAI-compatible chat completions (drop-in for OpenAI SDK clients) ---
+
+    @app.post("/v1/chat/completions")
+    def openai_chat_completions(req: ChatCompletionRequest):
+        """An OpenAI-compatible ``POST /v1/chat/completions`` endpoint.
+
+        Point any OpenAI SDK / LangChain / OpenWebUI client at ``<base>/v1`` and the full
+        agentic graph answers.  The last message is the task; earlier user/assistant
+        messages become the conversation history.  ``stream=true`` returns
+        ``chat.completion.chunk`` SSE deltas (terminated by ``data: [DONE]``); otherwise a
+        single ``chat.completion``.  Send ``"offline": true`` to use the deterministic
+        gateway (no API key).
+        """
+        if not req.messages:
+            raise HTTPException(status_code=400, detail="messages must not be empty")
+        task = req.messages[-1].content
+        history = [m.content for m in req.messages[:-1] if m.role in ("user", "assistant")]
+        sampling = _sampling(req.temperature, req.top_p, req.max_tokens)
+        created = int(time.time())
+        cid = f"chatcmpl-{uuid.uuid4().hex}"
+
+        if req.stream:
+            async def gen():
+                try:
+                    async for delta in stream_chat_tokens(
+                        task, history=history, sampling=sampling or {},
+                        tenant_id=req.tenant_id, offline=req.offline,
+                    ):
+                        yield _sse(_chat_chunk(cid, created, req.model,
+                                               delta={"content": delta}))
+                except Exception as exc:  # noqa: BLE001 - never crash the stream
+                    yield _sse(_chat_chunk(cid, created, req.model,
+                                           delta={"content": f"[error] {exc}"}))
+                yield _sse(_chat_chunk(cid, created, req.model, delta={},
+                                       finish_reason="stop"))
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(gen(), media_type="text/event-stream")
+
+        try:
+            result = run_task(task, history=history, tenant_id=req.tenant_id,
+                              offline=req.offline, sampling=sampling)
+        except BudgetExceeded as exc:
+            raise HTTPException(status_code=402, detail=str(exc)) from exc
+        usage = result.metrics.get("usage") or {}
+        return {
+            "id": cid, "object": "chat.completion", "created": created, "model": req.model,
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": result.final_answer or ""},
+                "finish_reason": "stop",
+            }],
+            "usage": {
+                "prompt_tokens": int(usage.get("prompt_tokens", 0)),
+                "completion_tokens": int(usage.get("completion_tokens", 0)),
+                "total_tokens": int(usage.get("total_tokens", 0)),
+            },
+        }
 
     # --- MCP connect (gated + allowlisted): make connector tools real ---
 

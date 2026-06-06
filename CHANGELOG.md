@@ -6,14 +6,29 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-03
+
+### Added
+- **Real token-by-token chat streaming.** `service.stream_chat_tokens` + `GET /api/chat/stream` (SSE)
+  stream the model's output deltas through `gateway.stream()` (single-agent, no graph) — the offline
+  `DemoGateway` yields once, a live LiteLLM gateway yields real tokens. The Studio Chat has a **"Direct
+  token stream"** toggle for a type-as-you-read experience.
+- **Interactive in-browser HITL approval.** `service.run_interactive` / `resume_interactive` +
+  `POST /api/run/interactive` and `POST /api/run/{thread_id}/resume` pause a run at a side-effecting tool
+  (`auto_approve=False`), return a `PendingApproval` with the thread id + action, and resume over the
+  durable `SqliteSaver` thread. The Studio Chat has an **"Ask before running tools"** toggle that renders
+  an **approval card** (tool + arguments + subtask) with Approve/Deny.
+
 ### Changed
-- **Test coverage raised to 100%** (line) and enforced (`fail_under = 100` in `[tool.coverage.report]`
-  + CI `--cov-fail-under=100`). The previously-untested paths now run under test — `cli.py`,
-  the `litellm`/`psycopg`/MCP-stdio/OTEL boundaries are exercised against faked modules so they
-  execute in CI, and server SSE/error branches are covered. Added `skipif`-guarded **live** tests
-  (`test_litellm_live.py`, `test_mcp_stdio_live.py`, the pgvector roundtrip) for local runs with real
-  credentials. Only genuinely non-executable lines (abstract bodies, `__main__`, a few defensive
-  guards) are excluded via `exclude_lines` / `# pragma: no cover`.
+- **Studio redesign** — a Microsoft Fluent / Azure-portal look (Segoe UI, communication-blue accent,
+  warm-neutral grays, 4px corners, left-bar nav selection, subtle elevation; light + dark), a **colorful
+  🌊 wave** logo (top-bar + chat hero + favicon), and an **Azure-Foundry-style Chat empty-state**
+  (centered, a 2-column prompt-card grid) with a clean rounded **composer box**.
+- **README modernized** — centered hero, an **About** section, a features grid, and collapsible deep-dives.
+- **Test coverage at 100%**, enforced in CI (`--cov-fail-under=100`). Previously-untested paths now run
+  under test — `cli.py`, the `litellm`/`psycopg`/MCP-stdio/OTEL boundaries (faked modules execute them in
+  CI), and server SSE/error branches — plus `skipif`-guarded **live** tests for local runs with real
+  credentials. Only genuinely non-executable lines are excluded via `exclude_lines` / `# pragma: no cover`.
 
 ## [0.10.0] - 2026-06-03
 

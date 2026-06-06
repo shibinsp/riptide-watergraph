@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-06
+
+### Added
+- **Documentation site.** A [mkdocs-material](https://squidfunk.github.io/mkdocs-material/) site under
+  `docs/` (install, quickstart, studio, streaming & HITL, tools & roles, workflows, MCP, evaluation,
+  monitoring, architecture, HTTP API, deploy, demo) published to **GitHub Pages** by a new
+  `.github/workflows/docs.yml` on push to `main`. A `docs` extra (`mkdocs-material`) builds it locally.
+- **Docker Compose.** A `docker-compose.yml` runs the Studio with a persistent `DATA_DIR` volume, plus a
+  `docs/deploy.md` covering Docker, Compose, hosting, and the full env-var reference.
+
+### Changed
+- `[project.urls] Documentation` now points at the hosted docs site; README links to it.
+
 ## [0.12.0] - 2026-06-06
 
 ### Added

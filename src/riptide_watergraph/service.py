@@ -31,6 +31,7 @@ from .observability.cost import (
     cost_from_usage,
     estimate_tokens,
 )
+from .interfaces.gateway import Message
 from .interfaces.swarm import SwarmComposer
 from .observability.tracing import init_tracing
 from .swarm import (
@@ -327,6 +328,167 @@ def stream_task(
         _record_usage(settings, tenant_id, task, final,
                       latency_ms=int((time.perf_counter() - _t0) * 1000))
     yield ("result", _result_from_state(tenant_id, final))
+
+
+class PendingApproval(BaseModel):
+    """Returned by ``run_interactive`` when the graph hit a side-effecting tool."""
+
+    status: str = "pending_approval"
+    thread_id: str
+    action: dict[str, Any]   # the raw interrupt payload from the graph
+
+
+async def stream_chat_tokens(
+    message: str,
+    *,
+    history: list[str] | None = None,
+    sampling: dict[str, Any] | None = None,
+    tenant_id: str | None = None,
+    offline: bool = False,
+    settings: Settings | None = None,
+):
+    """Yield raw token strings from the model gateway (direct, no graph).
+
+    This is a single-agent, tool-free completion — useful for a "type as you read"
+    chat experience. For multi-agent graph runs use ``stream_task`` instead.
+    The offline ``DemoGateway`` yields once (the full answer); live gateways yield
+    real token deltas.
+    """
+    settings = settings or get_settings()
+    tenant_id = tenant_id or settings.tenant_id
+    init_tracing(settings)
+
+    comp = build_components(settings, tenant_id=tenant_id, offline=offline,
+                            memory_on=False, guardrails_on=False)
+    model = comp.model
+    # Build a minimal conversation: a system preamble then the user message.
+    prior = history[-5:] if history else []
+    messages: list[Message] = [
+        Message(role="system",
+                content="You are a helpful assistant. Be concise and accurate."),
+        *[Message(role=("user" if i % 2 == 0 else "assistant"), content=h)
+          for i, h in enumerate(prior)],
+        Message(role="user", content=message),
+    ]
+    async for chunk in comp.gateway.stream(model=model, messages=messages,
+                                           **(sampling or {})):
+        yield chunk
+
+
+def run_interactive(
+    task: str,
+    *,
+    thread_id: str | None = None,
+    tenant_id: str | None = None,
+    offline: bool = False,
+    memory_on: bool = True,
+    single: bool = False,
+    guardrails_on: bool = True,
+    llm_composer: bool = False,
+    critic: bool = False,
+    supervisor: bool = False,
+    react_steps: int = 1,
+    vote_k: int = 1,
+    final_schema: dict[str, Any] | None = None,
+    sampling: dict[str, Any] | None = None,
+    history: list[str] | None = None,
+    settings: Settings | None = None,
+) -> RunResult | PendingApproval:
+    """Run a task with ``auto_approve=False``.
+
+    Returns a ``PendingApproval`` (with the thread_id and the interrupt payload)
+    when the graph pauses at a side-effecting tool, or a normal ``RunResult`` on
+    completion.  Pass the returned ``thread_id`` to ``resume_interactive`` to
+    approve/deny and continue.
+    """
+    settings = settings or get_settings()
+    tenant_id = tenant_id or settings.tenant_id
+    init_tracing(settings)
+    Path(settings.checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+    enforce_budget(settings, tenant_id)
+
+    thread_id = thread_id or str(uuid.uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+
+    comp = build_components(
+        settings, tenant_id=tenant_id, offline=offline, single=single,
+        memory_on=memory_on, guardrails_on=guardrails_on, llm_composer=llm_composer,
+    )
+    with SqliteSaver.from_conn_string(settings.checkpoint_path) as cp:
+        graph = build_graph(
+            gateway=comp.gateway, registry=comp.registry, composer=comp.composer,
+            model=comp.model, checkpointer=cp, memory=comp.memory,
+            reflector=comp.reflector, guardrails=comp.guardrails,
+            planner_model=comp.planner_model, worker_model=comp.worker_model,
+            enable_critic=critic, enable_supervisor=supervisor,
+            max_steps=react_steps, vote_k=vote_k, final_schema=final_schema,
+            sampling=sampling,
+        )
+        _t0 = time.perf_counter()
+        state = graph.invoke(
+            {"task": _with_history(task, history), "session_id": thread_id,
+             "tenant_id": tenant_id},
+            config,
+        )
+        if "__interrupt__" in state:
+            payload = state["__interrupt__"][0].value
+            return PendingApproval(thread_id=thread_id,
+                                   action=payload if isinstance(payload, dict) else {})
+        _record_usage(settings, tenant_id, task, state,
+                      latency_ms=int((time.perf_counter() - _t0) * 1000))
+    return _result_from_state(tenant_id, state)
+
+
+def resume_interactive(
+    thread_id: str,
+    *,
+    approved: bool = True,
+    answer: str | None = None,
+    task: str = "",
+    settings: Settings | None = None,
+) -> RunResult | PendingApproval:
+    """Resume an interrupted run after the operator approves/denies the pending action.
+
+    Reopens the ``SqliteSaver`` checkpoint for ``thread_id`` and resumes with the
+    correct ``Command(resume=…)`` payload. Returns ``PendingApproval`` again if
+    the graph hits another interrupt (chained side-effecting tools), or a final
+    ``RunResult`` when done.
+    """
+    settings = settings or get_settings()
+    tenant_id = settings.tenant_id
+    config = {"configurable": {"thread_id": thread_id}}
+
+    with SqliteSaver.from_conn_string(settings.checkpoint_path) as cp:
+        # Peek at the current interrupt to determine the resume shape.
+        from .graph import build_graph as _bg  # local to avoid circular at module load
+        graph_peek = _bg(
+            gateway=DemoGateway(),  # gateway unused during peek/resume
+            registry=default_registry(),
+            composer=SingleAgentComposer(model="demo"),
+            model="demo",
+            checkpointer=cp,
+        )
+        state_view = graph_peek.get_state(config)
+        interrupts = getattr(state_view, "interrupts", None) or []
+        payload = interrupts[0].value if interrupts else {}
+
+        if isinstance(payload, dict) and payload.get("type") == "clarification":  # pragma: no cover - tested via the clarify e2e suite; can't fake a SqliteSaver mid-interrupt
+            resume: dict[str, Any] = {
+                "answer": answer or "(no answer provided; proceed with best assumption)"
+            }
+        else:
+            resume = {"approved": approved}
+
+        _t0 = time.perf_counter()
+        state = graph_peek.invoke(Command(resume=resume), config)
+
+        if "__interrupt__" in state:  # pragma: no cover - chained interrupt tested via the service e2e suite
+            new_payload = state["__interrupt__"][0].value
+            return PendingApproval(thread_id=thread_id,
+                                   action=new_payload if isinstance(new_payload, dict) else {})
+        _record_usage(settings, tenant_id, task, state,
+                      latency_ms=int((time.perf_counter() - _t0) * 1000))
+    return _result_from_state(tenant_id, state)
 
 
 def _workflow_composer(spec: WorkflowSpec, settings: Settings) -> StaticPlanComposer:

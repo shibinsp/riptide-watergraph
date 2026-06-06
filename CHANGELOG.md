@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-06
+
+### Added
+- **OpenAI-compatible API.** A `POST /v1/chat/completions` endpoint that speaks the OpenAI
+  chat-completions wire format — point any OpenAI SDK / LangChain / OpenWebUI / `curl` client at
+  `<base>/v1` and the full agentic graph (memory, swarm, tools, guardrails) answers. The last message
+  is the task; earlier `user`/`assistant` messages become history. `stream=true` returns
+  `chat.completion.chunk` SSE deltas terminated by `data: [DONE]`; otherwise a single `chat.completion`.
+  A riptide-specific `"offline": true` field runs the deterministic gateway (no API key). Over-budget
+  tenants get HTTP 402; empty `messages` gets 400. Docs: [OpenAI-compatible API](docs/openai-api.md).
+
 ## [0.13.0] - 2026-06-06
 
 ### Added

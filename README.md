@@ -440,9 +440,22 @@ The research consensus is to **run your own evals** rather than trust vendor ben
 **single-vs-swarm routing**, **guardrail blocking**, **tool-call validity**, and a **self-learning recall
 probe** — so behavior is measurable and regressions fail CI.
 
-**Against a real model:** `pip install "riptide-watergraph[litellm]"`, set `OPENAI_API_KEY` and
-`RIPTIDE_WATERGRAPH_MODEL`, then `riptide eval` (no `--offline`) or `python examples/real_model_eval.py`.
-The runner uses the configured model wrapped in `ResilientGateway` (timeouts + retries).
+**Prove it on a real model.** Everything above runs offline with the deterministic `DemoGateway`. To run
+against a live LLM, install a gateway extra, set a key, and pick a model:
+
+```bash
+pip install "riptide-watergraph[litellm]"
+export OPENAI_API_KEY=sk-...                    # or ANTHROPIC_API_KEY
+export RIPTIDE_WATERGRAPH_MODEL=gpt-4o-mini     # any LiteLLM model string
+
+riptide eval                                    # score the suite against the live model
+python examples/real_model_chat.py "What is the capital of France?"   # one task via the library
+python examples/real_model_eval.py              # the eval suite via the library
+```
+
+The live path swaps in `LiteLLMGateway` wrapped in `ResilientGateway` (timeouts + retries) — no code
+change, just env. A skip-guarded smoke test (`tests/test_eval_real_smoke.py`) runs the suite end-to-end
+when a key is present and is skipped in CI; the wiring itself is covered offline against a faked boundary.
 
 ## 📊 Monitoring
 

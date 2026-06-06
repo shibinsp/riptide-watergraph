@@ -24,6 +24,12 @@ The FastAPI server (`riptide serve`, the `[server]` extra) exposes the routes be
 | `POST` | `/api/run/interactive` | run with `auto_approve=False`; returns `pending_approval` or a `RunResult` |
 | `POST` | `/api/run/{thread_id}/resume` | approve/deny (or answer a clarification) and continue |
 
+## OpenAI-compatible
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/v1/chat/completions` | OpenAI chat-completions (non-stream + `stream=true` SSE) — see [OpenAI-compatible API](openai-api.md) |
+
 ## Sessions
 
 | Method | Path | Purpose |

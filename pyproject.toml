@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "riptide-watergraph"
-version = "0.12.0"
+version = "0.13.0"
 description = "Riptide-Watergraph - a reusable, 'like water' multi-agent framework built as a thin layer on LangGraph."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -52,6 +52,8 @@ pgvector = [
     "langchain-postgres>=0.0.12",
     "psycopg[binary]>=3.2",
 ]
+# Documentation site (mkdocs-material). Docs-only; not needed at runtime.
+docs = ["mkdocs-material>=9.5"]
 # Convenience: everything needed to run against a real model with tracing + MCP + server.
 all = ["riptide-watergraph[litellm,observability,mcp,server]"]
 dev = [
@@ -70,7 +72,7 @@ riptide = "riptide_watergraph.cli:main"
 
 [project.urls]
 Repository = "https://github.com/shibinsp/riptide-watergraph"
-Documentation = "https://github.com/shibinsp/riptide-watergraph#readme"
+Documentation = "https://shibinsp.github.io/riptide-watergraph/"
 Issues = "https://github.com/shibinsp/riptide-watergraph/issues"
 Changelog = "https://github.com/shibinsp/riptide-watergraph/blob/main/CHANGELOG.md"
 

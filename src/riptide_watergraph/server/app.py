@@ -63,7 +63,7 @@ from ..tools import default_registry, register_dynamic_spec, remove_dynamic_spec
 from ..tools.registry import StaticToolRegistry, ToolValidationError
 from ..workflows import WorkflowSpec, WorkflowStore, WorkflowValidationError, validate_spec
 
-_VERSION = "0.12.0"
+_VERSION = "0.13.0"
 _STATIC = Path(__file__).parent / "static"
 _sessions = SessionStore()
 _workflows = WorkflowStore()

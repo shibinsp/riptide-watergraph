@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-06
+
+### Added
+- **Real-model proof path.** `examples/real_model_chat.py` runs one task through the library against a
+  live LLM (`run_task(offline=False)`), and `tests/test_eval_real_smoke.py` is a skip-guarded smoke test
+  that runs the full eval suite end-to-end when `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` is set (skipped in
+  CI). The real-model wiring (`EvalRunner(offline=False)` → `ResilientGateway(LiteLLMGateway)`) stays
+  covered offline against a faked boundary.
+
+### Fixed
+- Replaced the stale `AGENTIC_WATER_MODEL` env-var name (a rename leftover) with `RIPTIDE_WATERGRAPH_MODEL`
+  in `examples/real_model_eval.py` and the `riptide eval` real-model error hint.
+
 ## [0.11.0] - 2026-06-03
 
 ### Added

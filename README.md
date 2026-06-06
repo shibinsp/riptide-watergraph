@@ -403,6 +403,36 @@ for an offline end-to-end demo.
 
 </details>
 
+<details>
+<summary><strong>⌨️ Streaming &amp; interactive approval</strong></summary>
+
+**Direct token streaming.** `service.stream_chat_tokens(message, ...)` is an async generator that yields
+the model's output **token-by-token** straight from `gateway.stream()` — single-agent, no graph, no tools.
+The Studio Chat's **"Direct token stream"** toggle renders it as a type-as-you-read experience via
+`GET /api/chat/stream` (SSE: `{event:"token"}` deltas then `{event:"done"}`). Offline the `DemoGateway`
+yields the answer once; a live LiteLLM gateway yields real deltas.
+
+```python
+async for token in stream_chat_tokens("Explain RRF fusion in one line", offline=False):
+    print(token, end="", flush=True)
+```
+
+**Interactive human-in-the-loop approval.** `service.run_interactive(task, ...)` runs with
+`auto_approve=False`: when the graph reaches a side-effecting tool it **pauses** and returns a
+`PendingApproval` carrying the `thread_id` and the action (tool + arguments + subtask). The run state is
+persisted durably in the `SqliteSaver` thread, so a later `resume_interactive(thread_id, approved=...)`
+continues it — across separate HTTP requests. The Studio Chat's **"Ask before running tools"** toggle
+renders an **approval card** (Approve / Deny) backed by `POST /api/run/interactive` and
+`POST /api/run/{thread_id}/resume`.
+
+```python
+res = run_interactive("save a note about water", offline=True)
+if isinstance(res, PendingApproval):           # paused at a write tool
+    res = resume_interactive(res.thread_id, approved=True, task="save a note about water")
+```
+
+</details>
+
 ## 🧪 Evaluation
 
 The research consensus is to **run your own evals** rather than trust vendor benchmarks. `riptide eval
@@ -431,10 +461,10 @@ the optional `[observability]` extra (OpenTelemetry + Langfuse).
 - ✅ **Stage 4** — guardrails (injection/PII), tenant-isolated memory, per-tenant cost dashboard + budgets.
 - ✅ **Production hardening** — `ResilientGateway`, tool-error isolation, real token-usage cost accounting, security fixes, CI lint + type-check + **100% coverage gate**.
 - ✅ **Serve as a product** — FastAPI service + the Like Water Studio web UI; **MCP interop** + gated, allowlisted Studio connect.
+- ✅ **Streaming & interactive HITL** — real **token-by-token** chat streaming + **in-browser approve/deny** of side-effecting tools over durable threads.
 
 **Planned**
 
-- 🔜 Real **token-by-token** chat streaming + **interactive in-browser HITL** approval.
 - 🔜 A gated **real-model** eval/E2E proof + a recorded demo.
 - 🔜 A hosted **docs site** + one-click deploy guides.
 - 🧩 Optional infra seams — `SqliteSaver` → Temporal; `JsonFileMemory` → pgvector; gateway → vLLM/SGLang; LlamaFirewall / NeMo alongside the built-in guardrails.

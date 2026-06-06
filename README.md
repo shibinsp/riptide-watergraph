@@ -11,8 +11,9 @@ Self-learning memory · cost-aware swarm · guardrails · MCP tools · a batteri
 [![CI](https://github.com/shibinsp/riptide-watergraph/actions/workflows/ci.yml/badge.svg)](https://github.com/shibinsp/riptide-watergraph/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/shibinsp/riptide-watergraph/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-mkdocs--material-1f6feb.svg)](https://shibinsp.github.io/riptide-watergraph/)
 
-[About](#-about) · [Features](#-features) · [Install](#-install) · [Quickstart](#-quickstart) · [Studio](#-like-water-studio) · [Architecture](#-architecture) · [Examples](examples)
+📖 **[Documentation site](https://shibinsp.github.io/riptide-watergraph/)** · [About](#-about) · [Features](#-features) · [Install](#-install) · [Quickstart](#-quickstart) · [Studio](#-like-water-studio) · [Architecture](#-architecture) · [Examples](examples)
 
 </div>
 
@@ -475,11 +476,11 @@ the optional `[observability]` extra (OpenTelemetry + Langfuse).
 - ✅ **Production hardening** — `ResilientGateway`, tool-error isolation, real token-usage cost accounting, security fixes, CI lint + type-check + **100% coverage gate**.
 - ✅ **Serve as a product** — FastAPI service + the Like Water Studio web UI; **MCP interop** + gated, allowlisted Studio connect.
 - ✅ **Streaming & interactive HITL** — real **token-by-token** chat streaming + **in-browser approve/deny** of side-effecting tools over durable threads.
+- ✅ **Real-model proof** — a skip-guarded live eval smoke test + `real_model_chat`/`real_model_eval` examples; the wiring stays covered offline.
+- ✅ **Adoption pack** — a [hosted docs site](https://shibinsp.github.io/riptide-watergraph/) (mkdocs-material on GitHub Pages) + Docker Compose + a deploy guide.
 
 **Planned**
 
-- 🔜 A gated **real-model** eval/E2E proof + a recorded demo.
-- 🔜 A hosted **docs site** + one-click deploy guides.
 - 🧩 Optional infra seams — `SqliteSaver` → Temporal; `JsonFileMemory` → pgvector; gateway → vLLM/SGLang; LlamaFirewall / NeMo alongside the built-in guardrails.
 
 ## 🛠️ Development

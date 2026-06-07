@@ -8,8 +8,15 @@ Public surface (Stage 1):
 
 from __future__ import annotations
 
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 
+from .autonomy import (
+    AutonomyReport,
+    Goal,
+    Journal,
+    TemplateGoalProposer,
+    run_autonomous,
+)
 from .gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from .graph import build_graph
 from .guardrails import (
@@ -142,4 +149,10 @@ __all__ = [
     "Scorer",
     "SubstringScorer",
     "TemplateProposer",
+    # autonomy (bounded self-directed goal loop)
+    "run_autonomous",
+    "AutonomyReport",
+    "Goal",
+    "Journal",
+    "TemplateGoalProposer",
 ]

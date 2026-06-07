@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-06-07
+
+### Added
+- **Reward / RL (the final research seam)** — a new `riptide_watergraph.rl` package: a `RewardModel` seam
+  (`HeuristicRewardModel` offline / `LLMRewardModel`) that scores an outcome as a scalar in `[0, 1]`, a
+  **deterministic UCB1 `Bandit`** over candidate strategies, and `optimize_strategy(...)`, which runs the
+  reward-driven bandit loop to learn which strategy maximizes reward for a task (online policy
+  improvement). `service.optimize_strategy_for_task` (over the diverse reasoning styles) +
+  `riptide rl "<task>" --rounds N`. Honest scope: a bandit over *strategies*, not policy-gradient weight
+  updates. Docs: [Reward / RL](docs/reinforcement.md).
+
 ## [0.21.0] - 2026-06-07
 
 ### Added

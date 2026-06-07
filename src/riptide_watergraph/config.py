@@ -70,6 +70,10 @@ class Settings(BaseSettings):
         """Per-tenant SkillForge store so learned skills never leak across tenants."""
         return f"{self.data_dir}/tenants/{tenant_id}/skills"
 
+    def tenant_kg_path(self, tenant_id: str) -> str:
+        """Per-tenant knowledge graph built by the consolidation 'sleep' cycle."""
+        return f"{self.data_dir}/tenants/{tenant_id}/knowledge.json"
+
     @property
     def usage_log_path(self) -> str:
         return f"{self.data_dir}/usage.jsonl"

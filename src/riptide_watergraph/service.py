@@ -8,6 +8,7 @@ context is supported via an in-process ``SessionStore``.
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ from .observability.cost import (
 from .interfaces.gateway import Message
 from .interfaces.swarm import SwarmComposer
 from .observability.tracing import init_tracing
+from .skills import JsonFileSkillStore, LLMSkillSynthesizer, skill_to_spec
 from .swarm import (
     HeuristicSwarmComposer,
     LLMSwarmComposer,
@@ -57,6 +59,8 @@ class Components:
     model: str
     planner_model: str
     worker_model: str
+    skill_synthesizer: Any = None
+    skill_store: Any = None
 
 
 class RunResult(BaseModel):
@@ -83,6 +87,7 @@ class RunResult(BaseModel):
     guard_violations: list[str] = Field(default_factory=list)
     guard_violations_out: list[str] = Field(default_factory=list)
     clarifications: dict[str, str] = Field(default_factory=dict)
+    learned_skills: list[str] = Field(default_factory=list)  # SkillForge: skills authored this run
 
 
 def build_components(
@@ -94,6 +99,7 @@ def build_components(
     memory_on: bool = True,
     guardrails_on: bool = True,
     llm_composer: bool = False,
+    skills_on: bool = False,
     composer: SwarmComposer | None = None,
 ) -> Components:
     """Assemble the swappable layers from settings + flags (shared by CLI + server)."""
@@ -125,9 +131,20 @@ def build_components(
         reflector = LLMReflector(gateway, model=planner_model)
 
     guardrails = default_guardrails() if guardrails_on else None
+
+    registry = default_registry()
+    skill_synthesizer = None
+    skill_store = None
+    if skills_on:
+        skill_store = JsonFileSkillStore(settings.tenant_skills_dir(tenant_id))
+        skill_synthesizer = LLMSkillSynthesizer(gateway, model=planner_model)
+        # Load previously-learned skills so they're available as tools this run.
+        for sk in skill_store.load_all():
+            registry.register(skill_to_spec(sk, gateway=gateway, model=planner_model))
+
     return Components(
         gateway=gateway,
-        registry=default_registry(),
+        registry=registry,
         composer=composer,
         memory=memory,
         reflector=reflector,
@@ -135,6 +152,8 @@ def build_components(
         model=model,
         planner_model=planner_model,
         worker_model=worker_model,
+        skill_synthesizer=skill_synthesizer,
+        skill_store=skill_store,
     )
 
 
@@ -172,6 +191,7 @@ def run_task(
     vote_k: int = 1,
     final_schema: dict[str, Any] | None = None,
     sampling: dict[str, Any] | None = None,
+    learn_skills: bool = False,
     composer: SwarmComposer | None = None,
     settings: Settings | None = None,
 ) -> RunResult:
@@ -183,6 +203,7 @@ def run_task(
 
     enforce_budget(settings, tenant_id)  # raises BudgetExceeded if over ceiling
 
+    skills_on = learn_skills or os.getenv("RIPTIDE_ENABLE_SKILLS") == "1"
     comp = build_components(
         settings,
         tenant_id=tenant_id,
@@ -191,6 +212,7 @@ def run_task(
         memory_on=memory_on,
         guardrails_on=guardrails_on,
         llm_composer=llm_composer,
+        skills_on=skills_on,
         composer=composer,
     )
     thread_id = str(uuid.uuid4())
@@ -205,6 +227,8 @@ def run_task(
             checkpointer=cp,
             memory=comp.memory,
             reflector=comp.reflector,
+            skill_synthesizer=comp.skill_synthesizer,
+            skill_store=comp.skill_store,
             guardrails=comp.guardrails,
             planner_model=comp.planner_model,
             worker_model=comp.worker_model,
@@ -262,6 +286,7 @@ def _result_from_state(tenant_id: str, state: dict) -> RunResult:
         guard_violations=state.get("guard_violations") or [],
         guard_violations_out=state.get("guard_violations_out") or [],
         clarifications=state.get("clarifications") or {},
+        learned_skills=state.get("learned_skills") or [],
     )
 
 

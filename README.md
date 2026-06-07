@@ -517,7 +517,8 @@ the optional `[observability]` extra (OpenTelemetry + Langfuse).
 - ✅ **Self-authored skills (SkillForge)** — the agent distills successful runs into reusable, verified `skill.<name>` tools; its toolset grows over time.
 - ✅ **Cognitive memory** — a knowledge-graph semantic store + a consolidation "sleep" cycle (`riptide consolidate`) that distils episodic memory into facts the recall node surfaces.
 - ✅ **Deliberate reasoning** — verified best-of-N over diverse candidates + a calibrated confidence (`riptide deliberate`); the verifier seam that debate & tree-search build on next.
-- 🔜 **Self-improvement** (prompt/policy optimization from eval feedback) and **autonomy** (gated goal loops + auto-curriculum); **metacognition** wired into the graph (confidence-gated adaptive compute).
+- ✅ **Self-improvement** — measured prompt optimization (`riptide improve`): propose instruction variants, score them on examples, adopt only strict gains.
+- 🔜 **Autonomy** (gated goal loops + auto-curriculum) and **metacognition** wired into the graph (confidence-gated adaptive compute); multi-agent debate + tree-search on the verifier seam.
 - 🧩 Optional infra seams — `SqliteSaver` → Temporal; `JsonFileMemory` → pgvector; gateway → vLLM/SGLang; LlamaFirewall / NeMo alongside the built-in guardrails.
 
 ## 🛠️ Development

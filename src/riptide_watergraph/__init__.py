@@ -8,7 +8,7 @@ Public surface (Stage 1):
 
 from __future__ import annotations
 
-__version__ = "0.21.0"
+__version__ = "0.22.0"
 
 from .autonomy import (
     AutonomyReport,
@@ -68,6 +68,13 @@ from .optimize import (
     SubstringScorer,
     TemplateProposer,
     optimize_prompt,
+)
+from .rl import (
+    Bandit,
+    HeuristicRewardModel,
+    RewardModel,
+    StrategyReport,
+    optimize_strategy,
 )
 from .reasoning import (
     Candidate,
@@ -170,4 +177,10 @@ __all__ = [
     "Rollout",
     "make_environment",
     "rollout",
+    # reward / RL (learn the best strategy from a reward signal)
+    "RewardModel",
+    "HeuristicRewardModel",
+    "Bandit",
+    "optimize_strategy",
+    "StrategyReport",
 ]

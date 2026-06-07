@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-06-07
+
+### Added
+- **Self-improvement (measured prompt optimization)** — track 4 of the AGI-direction roadmap. A new
+  `riptide_watergraph.optimize` package: `Proposer` (`TemplateProposer` offline / `LLMPromptProposer`)
+  and `Scorer` (`SubstringScorer` / `ExactMatchScorer`) seams + `optimize_prompt(...)`, which proposes
+  instruction variants, scores each against labelled `Example`s, and **adopts a variant only if it
+  strictly beats the base** (DSPy/STOP-style, bounded recursive self-improvement). `service.improve_prompt`
+  + `riptide improve "<prompt>" --examples ex.json`. Additive, pure-Python, offline-testable. Docs:
+  [Self-improvement](docs/self-improvement.md).
+
 ## [0.17.0] - 2026-06-07
 
 ### Added

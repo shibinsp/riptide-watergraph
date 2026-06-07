@@ -15,6 +15,7 @@ from .reflector import Reflector, Trajectory
 from .reranker import Reranker
 from .swarm import SwarmComposer, SwarmDecision, TeamMember
 from .tools import ToolRegistry, ToolSpec
+from .verifier import Verdict, Verifier
 
 __all__ = [
     "Agent",
@@ -37,4 +38,6 @@ __all__ = [
     "SwarmComposer",
     "SwarmDecision",
     "TeamMember",
+    "Verdict",
+    "Verifier",
 ]

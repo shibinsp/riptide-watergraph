@@ -98,6 +98,10 @@ class JsonFileMemory(Memory):
     async def reflect(self, session_id: str) -> list[MemoryRecord]:
         return []  # reflection is driven by a Reflector in the graph's reflect node
 
+    def all_records(self) -> list[MemoryRecord]:
+        """Every stored record (used by the consolidation 'sleep' cycle)."""
+        return list(self._records.values())
+
     # --- hygiene ---
 
     def consolidate(self, *, sim_threshold: float = 0.97, max_failed: int = 5) -> int:

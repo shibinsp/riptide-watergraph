@@ -47,3 +47,21 @@ def lesson_record(
             "tags": tags or [],
         },
     )
+
+
+def fact_record(text: str, *, source: str = "", tags: list[str] | None = None) -> MemoryRecord:
+    """Build a SEMANTIC memory record (a distilled fact, e.g. from the knowledge graph).
+
+    Like ``lesson_record``, the id is a content hash so identical facts dedupe instead of
+    accumulating. Semantic records are recalled into prompts alongside procedural lessons.
+    """
+    digest = hashlib.sha1(text.strip().lower().encode("utf-8")).hexdigest()[:12]
+    return MemoryRecord(
+        id=f"semantic-{digest}",
+        text=text.strip(),
+        metadata={
+            "type": MemoryType.SEMANTIC.value,
+            "source": source,
+            "tags": tags or [],
+        },
+    )

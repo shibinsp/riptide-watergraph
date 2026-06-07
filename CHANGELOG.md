@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-06-07
+
+### Added
+- **Deliberate reasoning (verified best-of-N + confidence)** — track 3 of the AGI-direction roadmap. A
+  new `riptide_watergraph.reasoning` package: a `Verifier` seam (`HeuristicVerifier` offline /
+  `LLMVerifier`) and `deliberate(...)`, which generates several candidates from *diverse* reasoning
+  styles, scores each, and returns the best with a calibrated **confidence** (verifier score blended with
+  candidate agreement) — a metacognition signal for "escalate when unsure." `service.deliberate_task` +
+  `riptide deliberate "<task>"`. Additive (no graph-path change), pure-Python, offline-testable. Docs:
+  [Deliberate reasoning](docs/deliberation.md).
+
 ## [0.16.0] - 2026-06-07
 
 ### Added

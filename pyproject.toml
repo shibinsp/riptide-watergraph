@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "riptide-watergraph"
-version = "0.15.0"
+version = "0.16.0"
 description = "Riptide-Watergraph - a reusable, 'like water' multi-agent framework built as a thin layer on LangGraph."
 readme = "README.md"
 requires-python = ">=3.11"

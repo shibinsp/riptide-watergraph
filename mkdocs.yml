@@ -47,6 +47,7 @@ nav:
       - Monitoring: monitoring.md
   - Capabilities:
       - Tools & roles: tools-and-roles.md
+      - Self-authored skills: skills.md
       - Workflows: workflows.md
       - MCP interop: mcp.md
       - Evaluation: evaluation.md

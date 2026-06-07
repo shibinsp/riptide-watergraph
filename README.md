@@ -446,6 +446,26 @@ if isinstance(res, PendingApproval):           # paused at a write tool
 
 </details>
 
+<details>
+<summary><strong>🧬 Self-authored skills (SkillForge)</strong></summary>
+
+The agent distills a **successful run** into a reusable, parameterized **skill** — a prompt-program — then
+verifies it and registers it as a `skill.<name>` tool. Future runs retrieve and invoke it directly, so the
+agent's own toolset **grows over time** (capability acquisition, à la Voyager). It's **off by default**,
+**verified before registration**, per-tenant, and code-execution-free (safe by construction).
+
+```bash
+riptide run "summarize this text: ..." --offline --learn-skills   # author a skill from this run
+riptide skills                                                    # list what it has learned
+RIPTIDE_ENABLE_SKILLS=1 riptide serve                             # enable globally
+```
+
+The seam is swappable like everything else — `SkillSynthesizer`, `SkillStore`, `skill_to_spec`,
+`verify_skill` in `riptide_watergraph.skills`. This is **track 1 of the AGI-direction roadmap**; see
+[the docs](https://shibinsp.github.io/riptide-watergraph/skills/).
+
+</details>
+
 ## 🧪 Evaluation
 
 The research consensus is to **run your own evals** rather than trust vendor benchmarks. `riptide eval
@@ -490,9 +510,14 @@ the optional `[observability]` extra (OpenTelemetry + Langfuse).
 - ✅ **Streaming & interactive HITL** — real **token-by-token** chat streaming + **in-browser approve/deny** of side-effecting tools over durable threads.
 - ✅ **Real-model proof** — a skip-guarded live eval smoke test + `real_model_chat`/`real_model_eval` examples; the wiring stays covered offline.
 - ✅ **Adoption pack** — a [hosted docs site](https://shibinsp.github.io/riptide-watergraph/) (mkdocs-material on GitHub Pages) + Docker Compose + a deploy guide.
+- ✅ **OpenAI-compatible API** — `POST /v1/chat/completions` (non-stream + SSE) so any OpenAI SDK / LangChain / OpenWebUI client drives the agentic graph.
 
-**Planned**
+**Toward an AGI framework** (cognitive scaffolding; each behind a swappable ABC, off by default)
 
+- ✅ **Self-authored skills (SkillForge)** — the agent distills successful runs into reusable, verified `skill.<name>` tools; its toolset grows over time.
+- 🔜 **Cognitive memory** — a knowledge-graph semantic store + a consolidation "sleep" cycle (episodic → semantic → procedural).
+- 🔜 **Deliberate reasoning** — tree-search + multi-agent debate + verifier; **metacognition** (confidence-gated adaptive compute).
+- 🔜 **Self-improvement** (prompt/policy optimization from eval feedback) and **autonomy** (gated goal loops + auto-curriculum).
 - 🧩 Optional infra seams — `SqliteSaver` → Temporal; `JsonFileMemory` → pgvector; gateway → vLLM/SGLang; LlamaFirewall / NeMo alongside the built-in guardrails.
 
 ## 🛠️ Development

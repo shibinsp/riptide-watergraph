@@ -43,6 +43,9 @@ class DemoGateway(ModelGateway):
         if "reflection module" in system:
             return CompletionResult(content=self._reflect(user))
 
+        if "skill-synthesis module" in system:
+            return CompletionResult(content=self._skill(user))
+
         if "planning composer" in system:
             return CompletionResult(content=self._compose(user))
 
@@ -161,6 +164,22 @@ class DemoGateway(ModelGateway):
             "the most specific available tool."
         )
         return json.dumps({"lesson": lesson, "tags": ["offline", "demo"]})
+
+    @staticmethod
+    def _skill(user: str) -> str:
+        # Distill a deterministic, reusable skill (a prompt-program) from the task line.
+        task = ""
+        for line in user.splitlines():
+            if line.lower().startswith("task:"):
+                task = line.split(":", 1)[1].strip()
+                break
+        return json.dumps({
+            "name": "solve_similar_task",
+            "description": f"Reusable approach for tasks like: {task[:60]}",
+            "parameters": {"type": "object", "properties": {"input": {"type": "string"}}},
+            "template": "Apply the proven approach to: {input}",
+            "tags": ["learned", "demo"],
+        })
 
 
 def _call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:

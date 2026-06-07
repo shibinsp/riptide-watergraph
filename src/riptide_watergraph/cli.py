@@ -46,6 +46,7 @@ from .service import (
     enforce_budget,
     image_to_data_uri,
     improve_prompt,
+    optimize_strategy_for_task,
     run_autonomous_mission,
     run_in_environment,
     vision_chat,
@@ -329,6 +330,16 @@ def _improve(prompt: str, examples_path: str, offline: bool, candidates: int,
     return 0
 
 
+def _rl(task: str, rounds: int, offline: bool) -> int:
+    """RL: learn the best reasoning strategy for a task via a reward-driven bandit."""
+    report = optimize_strategy_for_task(task, rounds=rounds, offline=offline)
+    print(f" learned strategy values for: {task}")
+    for s in sorted(report.arms, key=lambda a: a.mean_reward, reverse=True):
+        print(f"   reward {s.mean_reward:.2f}  {s.arm:<12} (pulls {s.pulls})")
+    print(f"\n BEST STRATEGY: {report.best}")
+    return 0
+
+
 def _env(name: str, max_steps: int, offline: bool) -> int:
     """Roll an LLM policy out in a named environment and print the transitions + reward."""
     try:
@@ -511,6 +522,14 @@ def main(argv: list[str] | None = None) -> int:
     env_p.add_argument("--offline", action="store_true",
                        help="Use the deterministic offline gateway as the policy.")
 
+    rl_p = sub.add_parser(
+        "rl", help="Reward/RL: learn the best reasoning strategy for a task (UCB bandit).")
+    rl_p.add_argument("task", help="The task to learn a strategy for.")
+    rl_p.add_argument("--rounds", type=int, default=6, metavar="N",
+                      help="Number of bandit rounds (reward-driven trials).")
+    rl_p.add_argument("--offline", action="store_true",
+                      help="Use the deterministic offline gateway + reward model.")
+
     eval_p = sub.add_parser("eval", help="Run the evaluation suite and report metrics.")
     eval_p.add_argument("--offline", action="store_true",
                         help="Evaluate with the deterministic offline gateway.")
@@ -554,6 +573,8 @@ def main(argv: list[str] | None = None) -> int:
         return _see(args.question, args.image, args.offline)
     if args.command == "env":
         return _env(args.name, args.max_steps, args.offline)
+    if args.command == "rl":
+        return _rl(args.task, args.rounds, args.offline)
     if args.command == "eval":
         return _run_eval(args.offline)
     if args.command == "serve":

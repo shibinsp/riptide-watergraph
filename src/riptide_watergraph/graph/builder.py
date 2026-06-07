@@ -10,6 +10,7 @@ from ..guardrails.pipeline import GuardrailPipeline
 from ..interfaces.gateway import ModelGateway
 from ..interfaces.memory import Memory
 from ..interfaces.reflector import Reflector
+from ..interfaces.skill import SkillStore, SkillSynthesizer
 from ..interfaces.swarm import SwarmComposer
 from ..tools.registry import StaticToolRegistry
 from .nodes import (
@@ -23,6 +24,7 @@ from .nodes import (
     make_orchestrator,
     make_recall,
     make_reflect,
+    make_skill_forge,
     make_supervisor,
     make_swarm_worker,
     make_worker,
@@ -43,6 +45,8 @@ def build_graph(
     checkpointer: Any | None = None,
     memory: Memory | None = None,
     reflector: Reflector | None = None,
+    skill_synthesizer: SkillSynthesizer | None = None,
+    skill_store: SkillStore | None = None,
     guardrails: GuardrailPipeline | None = None,
     recall_k: int = 3,
     planner_model: str | None = None,
@@ -78,6 +82,8 @@ def build_graph(
         worker_model=worker_model or "",
         memory=memory,
         reflector=reflector,
+        skill_synthesizer=skill_synthesizer,
+        skill_store=skill_store,
         guardrails=guardrails,
         recall_k=recall_k,
         max_rounds=max_rounds,
@@ -144,6 +150,12 @@ def build_graph(
         exit_node = "reflect"
     else:
         exit_node = "finalize"
+
+    # SkillForge (if enabled): distill + register a reusable skill from a successful run.
+    if skill_synthesizer is not None and skill_store is not None:
+        g.add_node("skill_forge", make_skill_forge(ctx))
+        g.add_edge(exit_node, "skill_forge")
+        exit_node = "skill_forge"
 
     # Guardrails wrap the whole graph: screen input up front, redact output at the end.
     if guardrails is not None:

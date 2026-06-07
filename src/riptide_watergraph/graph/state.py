@@ -56,6 +56,9 @@ class OrchestratorState(TypedDict, total=False):
     clarifications: dict[str, str]  # subtask index (str) -> human clarification answer
     structured_output: dict[str, Any]  # validated structured final output (if schema set)
 
+    # --- SkillForge: self-authored capabilities distilled from this run ---
+    learned_skills: list[str]  # names of skills synthesized + registered this run
+
     # --- Stage 4: guardrails + multi-tenancy ---
     tenant_id: str  # tenant this run belongs to (isolation + cost attribution)
     blocked: bool  # set by guard_input when the request is refused

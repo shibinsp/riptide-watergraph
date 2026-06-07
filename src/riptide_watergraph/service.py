@@ -35,6 +35,13 @@ from .observability.cost import (
 )
 from .interfaces.gateway import Message
 from .interfaces.swarm import SwarmComposer
+from .autonomy import (
+    AutonomyReport,
+    Journal,
+    LLMGoalProposer,
+    TemplateGoalProposer,
+    run_autonomous,
+)
 from .observability.tracing import init_tracing
 from .optimize import (
     Example,
@@ -351,6 +358,33 @@ def improve_prompt(
 
     return optimize_prompt(base_prompt, examples, runner=runner, proposer=proposer,
                            scorer=SubstringScorer(), candidates=candidates)
+
+
+def run_autonomous_mission(
+    mission: str,
+    *,
+    max_steps: int = 3,
+    offline: bool = False,
+    tenant_id: str | None = None,
+    settings: Settings | None = None,
+) -> AutonomyReport:
+    """Autonomy: pursue a mission via self-set goals, journaled, bounded by max_steps + budget."""
+    settings = settings or get_settings()
+    tenant_id = tenant_id or settings.tenant_id
+    init_tracing(settings)
+    comp = build_components(settings, tenant_id=tenant_id, offline=offline,
+                            memory_on=False, guardrails_on=False)
+    proposer = (TemplateGoalProposer() if offline
+                else LLMGoalProposer(comp.gateway, model=comp.planner_model))
+    journal = Journal(settings.tenant_journal_path(tenant_id))
+
+    def executor(description: str) -> str:
+        result = run_task(description, tenant_id=tenant_id, offline=offline,
+                          memory_on=False, settings=settings)
+        return result.final_answer or ""
+
+    return run_autonomous(mission, executor=executor, proposer=proposer,
+                          journal=journal, max_steps=max_steps)
 
 
 def stream_task(

@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-06-07
+
+### Added
+- **Autonomy (bounded self-directed goal loop)** — the final cognitive-scaffolding track of the
+  AGI-direction roadmap. A new `riptide_watergraph.autonomy` package: a `GoalProposer` seam
+  (`TemplateGoalProposer` offline / `LLMGoalProposer`), a persistent per-tenant `Journal`, and
+  `run_autonomous(...)` — given a mission, the agent proposes its own subgoals, executes each through
+  the full graph, journals the result, and refills the queue with frontier goals (an auto-curriculum).
+  **Always bounded** by a hard `max_steps` cap and the tenant budget; guardrails + HITL still apply.
+  `service.run_autonomous_mission` + `riptide auto "<mission>" --max-steps N`. Docs:
+  [Autonomy](docs/autonomy.md).
+
 ## [0.18.0] - 2026-06-07
 
 ### Added

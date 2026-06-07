@@ -61,6 +61,7 @@ Stages 1–4 + Studio + the full **AGI-direction roadmap (8 tracks)** shipped ·
 
 - [About](#-about)
 - [Features](#-features)
+- [How it compares](#-how-it-compares)
 - [Install](#-install)
 - [Quickstart](#-quickstart)
 - [Like Water Studio](#-like-water-studio)
@@ -119,6 +120,57 @@ Full write-ups: [Skills](https://shibinsp.github.io/riptide-watergraph/skills/) 
 [Multimodal](https://shibinsp.github.io/riptide-watergraph/multimodal/) ·
 [Environments](https://shibinsp.github.io/riptide-watergraph/environments/) ·
 [Reward/RL](https://shibinsp.github.io/riptide-watergraph/reinforcement/)
+
+## 🆚 How it compares
+
+Honest positioning, not a takedown. **[AutoGen](https://github.com/microsoft/autogen)** (Microsoft) and
+**[CrewAI](https://github.com/crewAIInc/crewAI)** are larger, more mature ecosystems with bigger
+communities and far more production mileage — reach for them for that. Riptide-Watergraph's angle is a
+**small, readable, pure-Python core** that bundles an unusually broad set of **cognitive-scaffolding +
+production** features behind swappable seams, at 100% test coverage and runnable offline with no API key.
+
+The table reflects **out-of-the-box / OSS** capabilities as commonly configured. All three are MIT and
+move fast — verify against current versions.
+
+> Legend: ✅ built-in · 🟡 partial / via extension / paid tier · ❌ not built-in
+
+| Capability | Riptide-Watergraph | AutoGen | CrewAI |
+|---|:---:|:---:|:---:|
+| **Orchestration** | | | |
+| Multi-agent (groups / crews / swarm) | ✅ | ✅ | ✅ |
+| Role specialists + per-role scoped tools | ✅ | 🟡 | ✅ |
+| Cost-aware single-vs-swarm routing | ✅ | ❌ | ❌ |
+| Dependency-DAG waves + shared blackboard | ✅ | 🟡 | 🟡 |
+| Durable checkpoint + resume | ✅ (LangGraph) | 🟡 | 🟡 |
+| **Memory & learning** | | | |
+| Self-learning reflect → recall loop | ✅ | 🟡 | 🟡 |
+| Knowledge-graph memory + consolidation | ✅ | ❌ | 🟡 |
+| **Safety & ops** | | | |
+| Guardrails: prompt-injection + PII (in/out) | ✅ | ❌ | 🟡 |
+| Multi-tenancy + per-tenant cost budgets | ✅ | ❌ | ❌ |
+| HITL approve + clarify | ✅ | ✅ | ✅ |
+| Behavioral eval harness + 100% coverage gate | ✅ | 🟡 | 🟡 |
+| **Interfaces** | | | |
+| Tool registry + MCP interop | ✅ | ✅ | ✅ |
+| Bundled web Studio (free, in-repo) | ✅ | ✅ | 🟡 (paid) |
+| OpenAI-compatible `/v1` server | ✅ | ❌ | ❌ |
+| Multimodal (vision) | ✅ | ✅ | ✅ |
+| **AGI-direction toolkit** | | | |
+| Self-authored skills (agent writes its own tools) | ✅ | ❌ | ❌ |
+| Deliberate reasoning + calibrated confidence | ✅ | ❌ | ❌ |
+| Measured self-improvement (prompt optimization) | ✅ | ❌ | ❌ |
+| Autonomy loop + auto-curriculum | ✅ | 🟡 | 🟡 |
+| Gym-like environments + rollout | ✅ | ❌ | ❌ |
+| Reward model + strategy bandit | ✅ | ❌ | ❌ |
+| **Project** | | | |
+| Pure-Python core · offline demo · no API key needed | ✅ | 🟡 | 🟡 |
+| Ecosystem maturity / community size | 🟡 (newcomer) | ✅ | ✅ |
+
+**TL;DR** — choose **AutoGen / CrewAI** for ecosystem reach and battle-testing. Choose
+**Riptide-Watergraph** when you want a self-hostable, fully-readable stack that ships guardrails,
+multi-tenancy + cost budgets, a free Studio, an OpenAI-compatible API, *and* an AGI-direction toolkit
+(skills, knowledge-graph memory, deliberate reasoning, self-improvement, autonomy, vision, environments,
+reward/RL) — all behind swappable seams, offline-testable at 100% coverage.
 
 ## 🚀 Install
 

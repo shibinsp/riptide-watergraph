@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-06-07
+
+### Added
+- **Cognitive memory (knowledge graph + consolidation)** — track 2 of the AGI-direction roadmap. A
+  semantic-memory store of `(subject, predicate, object)` facts (`KnowledgeGraph`, merge-on-add with a
+  recurrence `weight`) behind a `TripleExtractor` seam (`RuleTripleExtractor` offline / `LLMTripleExtractor`),
+  plus a **consolidation "sleep" cycle** (`consolidate_memory` + `riptide consolidate`) that distils
+  accumulated **episodic** memory into the graph and writes **SEMANTIC** facts back into the store. The
+  existing `recall` node already injects semantic records, so consolidated knowledge is surfaced into
+  prompts on future runs **with no graph change** — per-tenant, pure-Python, offline-testable. Docs:
+  [Cognitive memory](docs/cognitive-memory.md).
+
 ## [0.15.0] - 2026-06-07
 
 ### Added

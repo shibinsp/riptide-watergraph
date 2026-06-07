@@ -16,6 +16,7 @@ from .memory import Memory, MemoryRecord, RetrievedItem
 from .optimizer import Example, Proposer, Scorer
 from .reflector import Reflector, Trajectory
 from .reranker import Reranker
+from .reward import RewardModel
 from .swarm import SwarmComposer, SwarmDecision, TeamMember
 from .tools import ToolRegistry, ToolSpec
 from .verifier import Verdict, Verifier
@@ -51,4 +52,5 @@ __all__ = [
     "JournalEntry",
     "Environment",
     "Observation",
+    "RewardModel",
 ]

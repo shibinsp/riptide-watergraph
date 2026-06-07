@@ -41,7 +41,12 @@ from .observability.cost import (
 )
 from .observability.tracing import init_tracing
 from .optimize import Example
-from .service import deliberate_task, enforce_budget, improve_prompt
+from .service import (
+    deliberate_task,
+    enforce_budget,
+    improve_prompt,
+    run_autonomous_mission,
+)
 from .skills import JsonFileSkillStore, LLMSkillSynthesizer, skill_to_spec
 from .interfaces import SwarmComposer
 from .swarm import HeuristicSwarmComposer, LLMSwarmComposer, SingleAgentComposer
@@ -321,6 +326,17 @@ def _improve(prompt: str, examples_path: str, offline: bool, candidates: int,
     return 0
 
 
+def _auto(mission: str, max_steps: int, offline: bool, tenant_id: str) -> int:
+    """Run the bounded autonomy loop: self-set goals, executed and journaled."""
+    report = run_autonomous_mission(mission, max_steps=max_steps, offline=offline,
+                                    tenant_id=tenant_id)
+    print(f" autonomous run: {report.steps} step(s) for mission: {mission}")
+    for i, entry in enumerate(report.entries, 1):
+        print(f"   {i}. {entry.goal}")
+        print(f"      -> {entry.result[:80]}")
+    return 0
+
+
 def _consolidate(tenant_id: str) -> int:
     """Run the consolidation 'sleep' cycle: episodic memory -> knowledge graph + facts."""
     settings = get_settings()
@@ -435,6 +451,16 @@ def main(argv: list[str] | None = None) -> int:
     improve_p.add_argument("--out", metavar="PATH",
                            help="Write the best prompt to this file.")
 
+    auto_p = sub.add_parser(
+        "auto",
+        help="Autonomy: pursue a mission via self-set goals (bounded by --max-steps + budget).")
+    auto_p.add_argument("mission", help="The high-level mission to pursue autonomously.")
+    auto_p.add_argument("--max-steps", type=int, default=3, metavar="N",
+                        help="Hard cap on the number of self-set goals to execute.")
+    auto_p.add_argument("--tenant", default="default", help="Tenant id for the run + journal.")
+    auto_p.add_argument("--offline", action="store_true",
+                        help="Use the deterministic offline gateway + goal proposer.")
+
     eval_p = sub.add_parser("eval", help="Run the evaluation suite and report metrics.")
     eval_p.add_argument("--offline", action="store_true",
                         help="Evaluate with the deterministic offline gateway.")
@@ -472,6 +498,8 @@ def main(argv: list[str] | None = None) -> int:
         return _deliberate(args.task, args.samples, args.offline)
     if args.command == "improve":
         return _improve(args.prompt, args.examples, args.offline, args.candidates, args.out)
+    if args.command == "auto":
+        return _auto(args.mission, args.max_steps, args.offline, args.tenant)
     if args.command == "eval":
         return _run_eval(args.offline)
     if args.command == "serve":

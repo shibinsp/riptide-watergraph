@@ -6,6 +6,7 @@ packages (``gateway``, ``memory``, ``tools``, ``swarm``).
 """
 
 from .agent import Agent
+from .autonomy import Goal, GoalProposer, JournalEntry
 from .embedding import EmbeddingProvider
 from .gateway import CompletionResult, Message, ModelGateway
 from .guardrail import Guardrail, GuardrailResult
@@ -44,4 +45,7 @@ __all__ = [
     "Example",
     "Scorer",
     "Proposer",
+    "Goal",
+    "GoalProposer",
+    "JournalEntry",
 ]

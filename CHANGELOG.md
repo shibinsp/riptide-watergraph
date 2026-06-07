@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-06-07
+
+### Added
+- **Environments (embodiment seam)** — an experimental research track. A Gym-like `Environment` interface
+  (`reset()` / `step(action)` → `Observation(text, reward, done)`) + a `rollout(env, policy, ...)` loop
+  that runs an LLM (or function) policy to episode end, returning a `Rollout(steps, total_reward,
+  transitions)`. Ships a deterministic toy `GuessingGameEnv` + a `make_environment` registry, so the whole
+  act/observe/reward loop is offline-testable. `service.run_in_environment` + `riptide env <name>`. The
+  substrate that turns "answer a question" into "act, observe, and improve". Docs:
+  [Environments](docs/environments.md).
+
 ## [0.20.0] - 2026-06-07
 
 ### Added

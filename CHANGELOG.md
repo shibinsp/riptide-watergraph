@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-07
+
+### Added
+- **Self-authored skills (SkillForge)** — track 1 of the AGI-direction roadmap. The agent distills a
+  successful run into a reusable, parameterized **skill** (a prompt-program), verifies it, persists it,
+  and registers it as a `skill.<name>` tool so future runs invoke it directly — capability acquisition,
+  à la Voyager. New `riptide_watergraph.skills` package behind ABCs (`SkillSynthesizer`, `SkillStore`)
+  with `LLMSkillSynthesizer`, `JsonFileSkillStore`, `skill_to_spec`, `verify_skill`; a gated `skill_forge`
+  graph node; `RunResult.learned_skills`; CLI `riptide run --learn-skills` and `riptide skills`.
+  **Off by default** (`--learn-skills` / `RIPTIDE_ENABLE_SKILLS=1`), verified before registration,
+  per-tenant, and code-execution-free (safe by construction). Docs: [Self-authored skills](docs/skills.md).
+
 ## [0.14.0] - 2026-06-06
 
 ### Added

@@ -40,7 +40,7 @@ from .observability.cost import (
     estimate_tokens,
 )
 from .observability.tracing import init_tracing
-from .service import enforce_budget
+from .service import deliberate_task, enforce_budget
 from .skills import JsonFileSkillStore, LLMSkillSynthesizer, skill_to_spec
 from .interfaces import SwarmComposer
 from .swarm import HeuristicSwarmComposer, LLMSwarmComposer, SingleAgentComposer
@@ -291,6 +291,19 @@ def _show_skills(tenant_id: str) -> int:
     return 0
 
 
+def _deliberate(task: str, samples: int, offline: bool) -> int:
+    """Verified best-of-N deliberation: print the ranked candidates + the best + confidence."""
+    result = deliberate_task(task, samples=samples, offline=offline)
+    print(f" deliberation ({len(result.candidates)} candidates)")
+    for c in result.candidates:
+        print(f"   [{c.score:.2f}] {c.style:<12} {c.answer[:72]}")
+    print(f"\n BEST (score {result.score:.2f}, confidence {result.confidence:.2f})")
+    print(result.answer or "(none)")
+    if not result.confident():
+        print("\n low confidence — consider escalating or asking a human.")
+    return 0
+
+
 def _consolidate(tenant_id: str) -> int:
     """Run the consolidation 'sleep' cycle: episodic memory -> knowledge graph + facts."""
     settings = get_settings()
@@ -383,6 +396,15 @@ def main(argv: list[str] | None = None) -> int:
     consolidate_p.add_argument("--tenant", default="default",
                                help="Tenant id whose memory to consolidate.")
 
+    deliberate_p = sub.add_parser(
+        "deliberate",
+        help="Verified best-of-N deliberation over diverse reasoning candidates.")
+    deliberate_p.add_argument("task", help="The task to deliberate on.")
+    deliberate_p.add_argument("--samples", type=int, default=3, metavar="N",
+                              help="Number of diverse candidates to generate + score.")
+    deliberate_p.add_argument("--offline", action="store_true",
+                              help="Use the deterministic offline gateway + verifier.")
+
     eval_p = sub.add_parser("eval", help="Run the evaluation suite and report metrics.")
     eval_p.add_argument("--offline", action="store_true",
                         help="Evaluate with the deterministic offline gateway.")
@@ -416,6 +438,8 @@ def main(argv: list[str] | None = None) -> int:
         return _show_skills(args.tenant)
     if args.command == "consolidate":
         return _consolidate(args.tenant)
+    if args.command == "deliberate":
+        return _deliberate(args.task, args.samples, args.offline)
     if args.command == "eval":
         return _run_eval(args.offline)
     if args.command == "serve":

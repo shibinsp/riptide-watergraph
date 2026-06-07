@@ -44,6 +44,7 @@ from .autonomy import (
     TemplateGoalProposer,
     run_autonomous,
 )
+from .environments import Rollout, make_environment, rollout
 from .observability.tracing import init_tracing
 from .optimize import (
     Example,
@@ -392,6 +393,35 @@ def vision_chat(
         **(sampling or {}),
     ))
     return result.content or ""
+
+
+def run_in_environment(
+    name: str,
+    *,
+    max_steps: int = 10,
+    offline: bool = False,
+    tenant_id: str | None = None,
+    settings: Settings | None = None,
+) -> Rollout:
+    """Embodiment: roll an LLM policy out in a named environment (act → observe → reward)."""
+    settings = settings or get_settings()
+    tenant_id = tenant_id or settings.tenant_id
+    init_tracing(settings)
+    enforce_budget(settings, tenant_id)
+    comp = build_components(settings, tenant_id=tenant_id, offline=offline,
+                            memory_on=False, guardrails_on=False)
+    env = make_environment(name)
+
+    def policy(observation: str) -> str:
+        result = asyncio.run(comp.gateway.complete(
+            model=comp.model,
+            messages=[Message(role="system", content="You are an agent acting in an environment. "
+                              "Read the observation and reply with only your next action."),
+                      Message(role="user", content=observation)],
+        ))
+        return result.content or ""
+
+    return rollout(env, policy, max_steps=max_steps)
 
 
 def run_autonomous_mission(

@@ -59,6 +59,7 @@ nav:
       - Architecture: architecture.md
       - HTTP API: api-reference.md
       - OpenAI-compatible API: openai-api.md
+      - Multimodal (vision): multimodal.md
   - Operations:
       - Deploy: deploy.md
       - Demo walkthrough: demo.md

@@ -515,7 +515,7 @@ the optional `[observability]` extra (OpenTelemetry + Langfuse).
 **Toward an AGI framework** (cognitive scaffolding; each behind a swappable ABC, off by default)
 
 - ✅ **Self-authored skills (SkillForge)** — the agent distills successful runs into reusable, verified `skill.<name>` tools; its toolset grows over time.
-- 🔜 **Cognitive memory** — a knowledge-graph semantic store + a consolidation "sleep" cycle (episodic → semantic → procedural).
+- ✅ **Cognitive memory** — a knowledge-graph semantic store + a consolidation "sleep" cycle (`riptide consolidate`) that distils episodic memory into facts the recall node surfaces.
 - 🔜 **Deliberate reasoning** — tree-search + multi-agent debate + verifier; **metacognition** (confidence-gated adaptive compute).
 - 🔜 **Self-improvement** (prompt/policy optimization from eval feedback) and **autonomy** (gated goal loops + auto-curriculum).
 - 🧩 Optional infra seams — `SqliteSaver` → Temporal; `JsonFileMemory` → pgvector; gateway → vLLM/SGLang; LlamaFirewall / NeMo alongside the built-in guardrails.

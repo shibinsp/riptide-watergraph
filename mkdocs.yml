@@ -48,6 +48,7 @@ nav:
   - Capabilities:
       - Tools & roles: tools-and-roles.md
       - Self-authored skills: skills.md
+      - Cognitive memory: cognitive-memory.md
       - Workflows: workflows.md
       - MCP interop: mcp.md
       - Evaluation: evaluation.md

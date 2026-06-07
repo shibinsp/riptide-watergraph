@@ -11,6 +11,7 @@ from .gateway import CompletionResult, Message, ModelGateway
 from .guardrail import Guardrail, GuardrailResult
 from .knowledge import Triple, TripleExtractor
 from .memory import Memory, MemoryRecord, RetrievedItem
+from .optimizer import Example, Proposer, Scorer
 from .reflector import Reflector, Trajectory
 from .reranker import Reranker
 from .swarm import SwarmComposer, SwarmDecision, TeamMember
@@ -40,4 +41,7 @@ __all__ = [
     "TeamMember",
     "Verdict",
     "Verifier",
+    "Example",
+    "Scorer",
+    "Proposer",
 ]

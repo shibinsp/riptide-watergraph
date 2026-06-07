@@ -47,6 +47,7 @@ from .service import (
     image_to_data_uri,
     improve_prompt,
     run_autonomous_mission,
+    run_in_environment,
     vision_chat,
 )
 from .skills import JsonFileSkillStore, LLMSkillSynthesizer, skill_to_spec
@@ -328,6 +329,19 @@ def _improve(prompt: str, examples_path: str, offline: bool, candidates: int,
     return 0
 
 
+def _env(name: str, max_steps: int, offline: bool) -> int:
+    """Roll an LLM policy out in a named environment and print the transitions + reward."""
+    try:
+        roll = run_in_environment(name, max_steps=max_steps, offline=offline)
+    except ValueError as exc:
+        print(f" {exc}")
+        return 1
+    print(f" environment '{name}': {roll.steps} step(s), total reward {roll.total_reward:.1f}")
+    for i, t in enumerate(roll.transitions, 1):
+        print(f"   {i}. obs: {t.observation[:42]} | action: {t.action[:24]} | reward {t.reward:.1f}")
+    return 0
+
+
 def _image_ref(arg: str) -> str:
     """A URL/data-URI passes through; a local path is read into a data URI."""
     if arg.startswith(("http://", "https://", "data:")):
@@ -489,6 +503,14 @@ def main(argv: list[str] | None = None) -> int:
     see_p.add_argument("--offline", action="store_true",
                        help="Use the deterministic offline (vision-aware) gateway.")
 
+    env_p = sub.add_parser(
+        "env", help="Embodiment: roll an LLM policy out in a named environment.")
+    env_p.add_argument("name", help="Environment name (e.g. 'guessing').")
+    env_p.add_argument("--max-steps", type=int, default=10, metavar="N",
+                       help="Maximum number of environment steps.")
+    env_p.add_argument("--offline", action="store_true",
+                       help="Use the deterministic offline gateway as the policy.")
+
     eval_p = sub.add_parser("eval", help="Run the evaluation suite and report metrics.")
     eval_p.add_argument("--offline", action="store_true",
                         help="Evaluate with the deterministic offline gateway.")
@@ -530,6 +552,8 @@ def main(argv: list[str] | None = None) -> int:
         return _auto(args.mission, args.max_steps, args.offline, args.tenant)
     if args.command == "see":
         return _see(args.question, args.image, args.offline)
+    if args.command == "env":
+        return _env(args.name, args.max_steps, args.offline)
     if args.command == "eval":
         return _run_eval(args.offline)
     if args.command == "serve":

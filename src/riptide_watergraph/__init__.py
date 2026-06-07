@@ -8,7 +8,7 @@ Public surface (Stage 1):
 
 from __future__ import annotations
 
-__version__ = "0.15.0"
+__version__ = "0.16.0"
 
 from .gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from .graph import build_graph
@@ -32,9 +32,19 @@ from .interfaces import (
     ToolRegistry,
     ToolSpec,
     Trajectory,
+    Triple,
+    TripleExtractor,
 )
 from .mcp import FakeMcpClient, McpToolInfo, register_mcp_tools
-from .memory import InMemoryMemory, JsonFileMemory, LLMReflector, MemoryType
+from .memory import (
+    InMemoryMemory,
+    JsonFileMemory,
+    KnowledgeGraph,
+    LLMReflector,
+    MemoryType,
+    RuleTripleExtractor,
+    consolidate_memory,
+)
 from .observability import CostTracker, UsageRecord
 from .skills import (
     JsonFileSkillStore,
@@ -57,6 +67,12 @@ __all__ = [
     "JsonFileMemory",
     "LLMReflector",
     "MemoryType",
+    # cognitive memory (knowledge graph + consolidation)
+    "KnowledgeGraph",
+    "RuleTripleExtractor",
+    "consolidate_memory",
+    "Triple",
+    "TripleExtractor",
     "StaticToolRegistry",
     "default_registry",
     "SingleAgentComposer",

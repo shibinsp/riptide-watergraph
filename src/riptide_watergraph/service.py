@@ -54,7 +54,19 @@ from .optimize import (
     TemplateProposer,
     optimize_prompt,
 )
-from .reasoning import DeliberationResult, HeuristicVerifier, LLMVerifier, deliberate
+from .reasoning import (
+    DEFAULT_STYLES,
+    DeliberationResult,
+    HeuristicVerifier,
+    LLMVerifier,
+    deliberate,
+)
+from .rl import (
+    HeuristicRewardModel,
+    LLMRewardModel,
+    StrategyReport,
+    optimize_strategy,
+)
 from .skills import JsonFileSkillStore, LLMSkillSynthesizer, skill_to_spec
 from .swarm import (
     HeuristicSwarmComposer,
@@ -422,6 +434,37 @@ def run_in_environment(
         return result.content or ""
 
     return rollout(env, policy, max_steps=max_steps)
+
+
+def optimize_strategy_for_task(
+    task: str,
+    *,
+    rounds: int = 6,
+    offline: bool = False,
+    tenant_id: str | None = None,
+    settings: Settings | None = None,
+) -> StrategyReport:
+    """RL: learn which reasoning strategy earns the most reward on a task (UCB bandit)."""
+    settings = settings or get_settings()
+    tenant_id = tenant_id or settings.tenant_id
+    init_tracing(settings)
+    enforce_budget(settings, tenant_id)
+    comp = build_components(settings, tenant_id=tenant_id, offline=offline,
+                            memory_on=False, guardrails_on=False)
+    styles = dict(DEFAULT_STYLES)  # arm name -> reasoning-style instruction
+    reward_model = (HeuristicRewardModel() if offline
+                    else LLMRewardModel(comp.gateway, model=comp.planner_model))
+
+    def runner(arm: str, t: str) -> str:
+        result = asyncio.run(comp.gateway.complete(
+            model=comp.model,
+            messages=[Message(role="system", content=styles[arm]),
+                      Message(role="user", content=t)],
+        ))
+        return result.content or ""
+
+    return optimize_strategy(task, list(styles), runner=runner,
+                             reward_model=reward_model, rounds=rounds)
 
 
 def run_autonomous_mission(

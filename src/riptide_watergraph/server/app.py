@@ -59,13 +59,14 @@ from ..service import (
     stream_chat_tokens,
     stream_task,
     stream_workflow,
+    vision_chat,
 )
 from ..swarm.roles import AgentRole, all_roles
 from ..tools import default_registry, register_dynamic_spec, remove_dynamic_specs
 from ..tools.registry import StaticToolRegistry, ToolValidationError
 from ..workflows import WorkflowSpec, WorkflowStore, WorkflowValidationError, validate_spec
 
-_VERSION = "0.19.0"
+_VERSION = "0.20.0"
 _STATIC = Path(__file__).parent / "static"
 _sessions = SessionStore()
 _workflows = WorkflowStore()
@@ -248,10 +249,14 @@ class ResumeRequest(BaseModel):
 
 
 class ChatMessage(BaseModel):
-    """One message in an OpenAI-compatible chat-completions request."""
+    """One message in an OpenAI-compatible chat-completions request.
+
+    ``content`` is either a plain string or the OpenAI multimodal parts list
+    (``[{"type": "text", ...}, {"type": "image_url", ...}]``) for vision.
+    """
 
     role: str = "user"
-    content: str = ""
+    content: str | list[dict[str, Any]] = ""
 
 
 class ChatCompletionRequest(BaseModel):
@@ -284,6 +289,22 @@ class MetaResponse(BaseModel):
 
 def _sse(obj: dict) -> str:
     return f"data: {json.dumps(obj)}\n\n"
+
+
+def _content_text_images(content: str | list[dict[str, Any]]) -> tuple[str, list[str]]:
+    """Split an OpenAI message ``content`` into (text, image-urls). Plain strings have no images."""
+    if isinstance(content, str):
+        return content, []
+    texts: list[str] = []
+    images: list[str] = []
+    for part in content:
+        if part.get("type") == "text":
+            texts.append(str(part.get("text", "")))
+        elif part.get("type") == "image_url":
+            url = (part.get("image_url") or {}).get("url")
+            if url:
+                images.append(str(url))
+    return " ".join(texts), images
 
 
 def _chat_chunk(cid: str, created: int, model: str, *, delta: dict,
@@ -705,11 +726,26 @@ def create_app() -> FastAPI:
         """
         if not req.messages:
             raise HTTPException(status_code=400, detail="messages must not be empty")
-        task = req.messages[-1].content
-        history = [m.content for m in req.messages[:-1] if m.role in ("user", "assistant")]
+        task, task_images = _content_text_images(req.messages[-1].content)
+        history = [_content_text_images(m.content)[0]
+                   for m in req.messages[:-1] if m.role in ("user", "assistant")]
         sampling = _sampling(req.temperature, req.top_p, req.max_tokens)
         created = int(time.time())
         cid = f"chatcmpl-{uuid.uuid4().hex}"
+
+        # Vision: when the latest message carries images, answer multimodally (no graph).
+        if task_images:
+            try:
+                answer = vision_chat(task, task_images, offline=req.offline,
+                                     sampling=sampling, tenant_id=req.tenant_id)
+            except BudgetExceeded as exc:
+                raise HTTPException(status_code=402, detail=str(exc)) from exc
+            return {
+                "id": cid, "object": "chat.completion", "created": created, "model": req.model,
+                "choices": [{"index": 0, "finish_reason": "stop",
+                             "message": {"role": "assistant", "content": answer}}],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            }
 
         if req.stream:
             async def gen():

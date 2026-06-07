@@ -40,7 +40,8 @@ from .observability.cost import (
     estimate_tokens,
 )
 from .observability.tracing import init_tracing
-from .service import deliberate_task, enforce_budget
+from .optimize import Example
+from .service import deliberate_task, enforce_budget, improve_prompt
 from .skills import JsonFileSkillStore, LLMSkillSynthesizer, skill_to_spec
 from .interfaces import SwarmComposer
 from .swarm import HeuristicSwarmComposer, LLMSwarmComposer, SingleAgentComposer
@@ -304,6 +305,22 @@ def _deliberate(task: str, samples: int, offline: bool) -> int:
     return 0
 
 
+def _improve(prompt: str, examples_path: str, offline: bool, candidates: int,
+             out: str | None) -> int:
+    """Self-improvement: optimize an instruction against labelled examples, keep only gains."""
+    data = json.loads(Path(examples_path).read_text(encoding="utf-8"))
+    examples = [Example(input=str(d["input"]), expected=str(d["expected"])) for d in data]
+    result = improve_prompt(prompt, examples, offline=offline, candidates=candidates)
+    print(f" base score: {result.base_score:.2f}")
+    print(f" best score: {result.best_score:.2f} "
+          f"({'improved' if result.improved else 'no improvement'})")
+    if out:
+        Path(out).write_text(result.best_prompt, encoding="utf-8")
+        print(f" wrote improved prompt to {out}")
+    print("\n BEST PROMPT\n" + result.best_prompt)
+    return 0
+
+
 def _consolidate(tenant_id: str) -> int:
     """Run the consolidation 'sleep' cycle: episodic memory -> knowledge graph + facts."""
     settings = get_settings()
@@ -405,6 +422,19 @@ def main(argv: list[str] | None = None) -> int:
     deliberate_p.add_argument("--offline", action="store_true",
                               help="Use the deterministic offline gateway + verifier.")
 
+    improve_p = sub.add_parser(
+        "improve",
+        help="Self-improvement: optimize a prompt against labelled examples (keep only gains).")
+    improve_p.add_argument("prompt", help="The base instruction/prompt to improve.")
+    improve_p.add_argument("--examples", required=True, metavar="PATH",
+                           help='JSON file: [{"input": "...", "expected": "..."}, ...].')
+    improve_p.add_argument("--candidates", type=int, default=3, metavar="N",
+                           help="Number of variant prompts to propose and score.")
+    improve_p.add_argument("--offline", action="store_true",
+                           help="Use the deterministic offline gateway + proposer.")
+    improve_p.add_argument("--out", metavar="PATH",
+                           help="Write the best prompt to this file.")
+
     eval_p = sub.add_parser("eval", help="Run the evaluation suite and report metrics.")
     eval_p.add_argument("--offline", action="store_true",
                         help="Evaluate with the deterministic offline gateway.")
@@ -440,6 +470,8 @@ def main(argv: list[str] | None = None) -> int:
         return _consolidate(args.tenant)
     if args.command == "deliberate":
         return _deliberate(args.task, args.samples, args.offline)
+    if args.command == "improve":
+        return _improve(args.prompt, args.examples, args.offline, args.candidates, args.out)
     if args.command == "eval":
         return _run_eval(args.offline)
     if args.command == "serve":

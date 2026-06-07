@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import uuid
@@ -34,6 +35,7 @@ from .observability.cost import (
 )
 from .observability.tracing import init_tracing
 from .service import enforce_budget
+from .skills import JsonFileSkillStore, LLMSkillSynthesizer, skill_to_spec
 from .interfaces import SwarmComposer
 from .swarm import HeuristicSwarmComposer, LLMSwarmComposer, SingleAgentComposer
 from .tools import default_registry
@@ -72,6 +74,7 @@ def _run_task(
     react_steps: int = 1,
     vote_k: int = 1,
     final_schema: dict[str, Any] | None = None,
+    learn_skills: bool = False,
 ) -> int:
     settings = get_settings()
     init_tracing(settings)
@@ -113,6 +116,15 @@ def _run_task(
     reflector = LLMReflector(gateway, model=planner_model) if memory_on else None
     guardrails = default_guardrails() if guardrails_on else None
 
+    # SkillForge: load previously-learned skills as tools, and (when on) distill new ones.
+    skill_store = None
+    skill_synthesizer = None
+    if learn_skills or os.getenv("RIPTIDE_ENABLE_SKILLS") == "1":
+        skill_store = JsonFileSkillStore(settings.tenant_skills_dir(tenant_id))
+        skill_synthesizer = LLMSkillSynthesizer(gateway, model=planner_model)
+        for sk in skill_store.load_all():
+            registry.register(skill_to_spec(sk, gateway=gateway, model=planner_model))
+
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -125,6 +137,8 @@ def _run_task(
             checkpointer=checkpointer,
             memory=memory,
             reflector=reflector,
+            skill_synthesizer=skill_synthesizer,
+            skill_store=skill_store,
             guardrails=guardrails,
             planner_model=planner_model,
             worker_model=worker_model,
@@ -157,6 +171,9 @@ def _run_task(
                 result = graph.invoke(Command(resume={"approved": approved}), config)
 
         _print_result(result, memory_on=memory_on, memory=memory)
+        learned = result.get("learned_skills") or []
+        if learned:
+            print(f" learned {len(learned)} skill(s): {', '.join(learned)}")
         _record_usage(settings, tenant_id, task, result)
     return 0
 
@@ -254,6 +271,20 @@ def _show_costs() -> int:
     return 0
 
 
+def _show_skills(tenant_id: str) -> int:
+    """List the skills the agent has authored for this tenant (SkillForge)."""
+    settings = get_settings()
+    skills = JsonFileSkillStore(settings.tenant_skills_dir(tenant_id)).load_all()
+    if not skills:
+        print("no learned skills yet (run with --learn-skills to author some).")
+        return 0
+    print(f"{'skill':<28}description")
+    print("-" * 60)
+    for sk in skills:
+        print(f"{'skill.' + sk.name:<28}{sk.description}")
+    return 0
+
+
 def _run_eval(offline: bool) -> int:
     try:
         report = EvalRunner(offline=offline).run()
@@ -310,8 +341,15 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--schema", metavar="PATH",
                        help="Path to a JSON Schema file; finalize emits a validated "
                             "structured output matching it.")
+    run_p.add_argument("--learn-skills", action="store_true",
+                       help="SkillForge: distill a reusable skill from a successful run and "
+                            "register it for future runs (also loads previously-learned skills).")
 
     sub.add_parser("costs", help="Show the per-tenant cost dashboard.")
+
+    skills_p = sub.add_parser("skills", help="List the agent's self-authored skills.")
+    skills_p.add_argument("--tenant", default="default",
+                          help="Tenant id whose learned skills to list.")
 
     eval_p = sub.add_parser("eval", help="Run the evaluation suite and report metrics.")
     eval_p.add_argument("--offline", action="store_true",
@@ -338,9 +376,12 @@ def main(argv: list[str] | None = None) -> int:
             react_steps=args.react,
             vote_k=args.vote,
             final_schema=final_schema,
+            learn_skills=args.learn_skills,
         )
     if args.command == "costs":
         return _show_costs()
+    if args.command == "skills":
+        return _show_skills(args.tenant)
     if args.command == "eval":
         return _run_eval(args.offline)
     if args.command == "serve":

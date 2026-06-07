@@ -8,6 +8,7 @@ packages (``gateway``, ``memory``, ``tools``, ``swarm``).
 from .agent import Agent
 from .autonomy import Goal, GoalProposer, JournalEntry
 from .embedding import EmbeddingProvider
+from .environment import Environment, Observation
 from .gateway import CompletionResult, Message, ModelGateway
 from .guardrail import Guardrail, GuardrailResult
 from .knowledge import Triple, TripleExtractor
@@ -48,4 +49,6 @@ __all__ = [
     "Goal",
     "GoalProposer",
     "JournalEntry",
+    "Environment",
+    "Observation",
 ]

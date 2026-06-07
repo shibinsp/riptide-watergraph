@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-06-07
+
+### Added
+- **Multimodal perception (vision)** — the first experimental research seam beyond the roadmap. The
+  gateway `Message` gains an `images` field (URLs / `data:` URIs) and `to_dict()` renders the OpenAI
+  multimodal content-parts list when images are present (additive — text paths unchanged). A
+  vision-aware `DemoGateway` makes it offline-testable. `service.vision_chat` + `image_to_data_uri`,
+  `riptide see "<question>" --image ...`, and the **`/v1/chat/completions`** endpoint now accepts OpenAI's
+  native multimodal `content`, so a standard vision client works unchanged. Docs:
+  [Multimodal (vision)](docs/multimodal.md).
+
 ## [0.19.0] - 2026-06-07
 
 ### Added

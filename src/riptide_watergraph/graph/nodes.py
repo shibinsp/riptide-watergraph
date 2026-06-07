@@ -25,6 +25,7 @@ from ..guardrails.pipeline import GuardrailPipeline
 from ..interfaces.gateway import Message, ModelGateway
 from ..interfaces.memory import Memory, MemoryRecord
 from ..interfaces.reflector import Reflector, Trajectory
+from ..interfaces.skill import SkillStore, SkillSynthesizer
 from ..interfaces.swarm import SwarmComposer
 from ..memory.types import MemoryType
 from ..observability.tracing import span
@@ -46,6 +47,8 @@ class GraphContext:
     worker_model: str = ""  # model for workers (defaults to model; usually cheaper)
     memory: Memory | None = None  # Stage 2: long-term memory (recall + reflect)
     reflector: Reflector | None = None  # Stage 2: distills lessons from trajectories
+    skill_synthesizer: SkillSynthesizer | None = None  # SkillForge: distill reusable skills
+    skill_store: SkillStore | None = None  # SkillForge: persist learned skills
     recall_k: int = 3  # how many lessons to retrieve and inject
     tool_k: int = 4  # Stage 3: how many tools to retrieve on demand per subtask
     guardrails: GuardrailPipeline | None = None  # Stage 4: input/output safety
@@ -842,6 +845,44 @@ def make_reflect(ctx: GraphContext):
             }
 
     return reflect
+
+
+def make_skill_forge(ctx: GraphContext):
+    """SkillForge: distill a reusable skill from a successful run and register it.
+
+    On success, ask the synthesizer for a parameterized skill, verify it, persist it to the
+    skill store, and register it (as a ``skill.<name>`` tool) so future runs can invoke it —
+    the agent's toolset grows over time. A failed run, no distillable skill, or a skill that
+    fails verification is a no-op (the default graph never includes this node).
+    """
+    from ..skills.forge import skill_to_spec
+    from ..skills.verify import verify_skill
+
+    def skill_forge(state: OrchestratorState) -> dict[str, Any]:
+        assert ctx.skill_synthesizer is not None and ctx.skill_store is not None  # invariant
+        if not _compute_success(state):
+            return {}
+        with span("skill_forge"):
+            trajectory = Trajectory(
+                task=state["task"],
+                plan=state.get("plan") or [],
+                results=[dict(r) for r in (state.get("results") or [])],
+                success=True,
+                metrics=state.get("metrics") or {},
+                session_id=state.get("session_id", ""),
+            )
+            skill = _run(ctx.skill_synthesizer.synthesize(trajectory))
+            if skill is None:
+                return {}
+            ok, _reason = verify_skill(skill, gateway=ctx.gateway, model=ctx.model)
+            if not ok:
+                return {}
+            ctx.skill_store.save(skill)
+            spec = skill_to_spec(skill, gateway=ctx.gateway, model=ctx.model)
+            ctx.registry.register(spec)
+            return {"learned_skills": [spec.name]}
+
+    return skill_forge
 
 
 def _episodic_record(state: OrchestratorState, success: bool) -> MemoryRecord:

@@ -13,14 +13,25 @@ class Message(BaseModel):
 
     role: str  # "system" | "user" | "assistant" | "tool"
     content: str | None = None
+    images: list[str] = Field(default_factory=list)  # image URLs / data URIs (vision)
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
     name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Render to the dict shape LiteLLM/OpenAI expect, dropping empty fields."""
+        """Render to the dict shape LiteLLM/OpenAI expect, dropping empty fields.
+
+        With images, ``content`` becomes the OpenAI multimodal parts list
+        (``{"type": "text"}`` + ``{"type": "image_url"}``) so any vision model can read it.
+        """
         out: dict[str, Any] = {"role": self.role}
-        if self.content is not None:
+        if self.images:
+            parts: list[dict[str, Any]] = []
+            if self.content is not None:
+                parts.append({"type": "text", "text": self.content})
+            parts.extend({"type": "image_url", "image_url": {"url": u}} for u in self.images)
+            out["content"] = parts
+        elif self.content is not None:
             out["content"] = self.content
         if self.tool_calls:
             out["tool_calls"] = self.tool_calls

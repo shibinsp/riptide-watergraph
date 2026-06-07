@@ -36,6 +36,14 @@ from .observability.cost import (
 from .interfaces.gateway import Message
 from .interfaces.swarm import SwarmComposer
 from .observability.tracing import init_tracing
+from .optimize import (
+    Example,
+    LLMPromptProposer,
+    OptimizationResult,
+    SubstringScorer,
+    TemplateProposer,
+    optimize_prompt,
+)
 from .reasoning import DeliberationResult, HeuristicVerifier, LLMVerifier, deliberate
 from .skills import JsonFileSkillStore, LLMSkillSynthesizer, skill_to_spec
 from .swarm import (
@@ -313,6 +321,36 @@ def deliberate_task(
         task, gateway=comp.gateway, model=comp.model, verifier=verifier,
         samples=samples, sampling=sampling,
     ))
+
+
+def improve_prompt(
+    base_prompt: str,
+    examples: list[Example],
+    *,
+    offline: bool = False,
+    candidates: int = 3,
+    tenant_id: str | None = None,
+    settings: Settings | None = None,
+) -> OptimizationResult:
+    """Self-improvement: rewrite an instruction, keeping a variant only if it scores higher."""
+    settings = settings or get_settings()
+    tenant_id = tenant_id or settings.tenant_id
+    init_tracing(settings)
+    comp = build_components(settings, tenant_id=tenant_id, offline=offline,
+                            memory_on=False, guardrails_on=False)
+    proposer = (TemplateProposer() if offline
+                else LLMPromptProposer(comp.gateway, model=comp.planner_model))
+
+    def runner(prompt: str, inp: str) -> str:
+        result = asyncio.run(comp.gateway.complete(
+            model=comp.model,
+            messages=[Message(role="system", content=prompt),
+                      Message(role="user", content=inp)],
+        ))
+        return result.content or ""
+
+    return optimize_prompt(base_prompt, examples, runner=runner, proposer=proposer,
+                           scorer=SubstringScorer(), candidates=candidates)
 
 
 def stream_task(

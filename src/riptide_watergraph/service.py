@@ -9,6 +9,8 @@ context is supported via an in-process ``SessionStore``.
 from __future__ import annotations
 
 import asyncio
+import base64
+import mimetypes
 import os
 import time
 import uuid
@@ -358,6 +360,38 @@ def improve_prompt(
 
     return optimize_prompt(base_prompt, examples, runner=runner, proposer=proposer,
                            scorer=SubstringScorer(), candidates=candidates)
+
+
+def image_to_data_uri(path: str) -> str:
+    """Read a local image file into a ``data:`` URI usable as a vision image reference."""
+    p = Path(path)
+    mime = mimetypes.guess_type(p.name)[0] or "image/png"
+    encoded = base64.b64encode(p.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
+def vision_chat(
+    prompt: str,
+    images: list[str],
+    *,
+    offline: bool = False,
+    sampling: dict[str, Any] | None = None,
+    tenant_id: str | None = None,
+    settings: Settings | None = None,
+) -> str:
+    """Multimodal: ask one question about one or more images (single-agent, no graph)."""
+    settings = settings or get_settings()
+    tenant_id = tenant_id or settings.tenant_id
+    init_tracing(settings)
+    enforce_budget(settings, tenant_id)
+    comp = build_components(settings, tenant_id=tenant_id, offline=offline,
+                            memory_on=False, guardrails_on=False)
+    result = asyncio.run(comp.gateway.complete(
+        model=comp.model,
+        messages=[Message(role="user", content=prompt, images=list(images))],
+        **(sampling or {}),
+    ))
+    return result.content or ""
 
 
 def run_autonomous_mission(

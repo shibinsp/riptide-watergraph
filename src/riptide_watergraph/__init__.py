@@ -8,7 +8,7 @@ Public surface (Stage 1):
 
 from __future__ import annotations
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"
 
 from .gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from .graph import build_graph
@@ -36,6 +36,14 @@ from .interfaces import (
 from .mcp import FakeMcpClient, McpToolInfo, register_mcp_tools
 from .memory import InMemoryMemory, JsonFileMemory, LLMReflector, MemoryType
 from .observability import CostTracker, UsageRecord
+from .skills import (
+    JsonFileSkillStore,
+    LLMSkillSynthesizer,
+    Skill,
+    SkillStore,
+    SkillSynthesizer,
+    skill_to_spec,
+)
 from .swarm import HeuristicSwarmComposer, LLMSwarmComposer, SingleAgentComposer
 from .tools import StaticToolRegistry, default_registry
 
@@ -79,4 +87,11 @@ __all__ = [
     "register_mcp_tools",
     "FakeMcpClient",
     "McpToolInfo",
+    # SkillForge (self-authored capabilities)
+    "Skill",
+    "SkillSynthesizer",
+    "SkillStore",
+    "LLMSkillSynthesizer",
+    "JsonFileSkillStore",
+    "skill_to_spec",
 ]

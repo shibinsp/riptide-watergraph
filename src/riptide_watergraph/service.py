@@ -8,6 +8,7 @@ context is supported via an in-process ``SessionStore``.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 import uuid
@@ -35,6 +36,7 @@ from .observability.cost import (
 from .interfaces.gateway import Message
 from .interfaces.swarm import SwarmComposer
 from .observability.tracing import init_tracing
+from .reasoning import DeliberationResult, HeuristicVerifier, LLMVerifier, deliberate
 from .skills import JsonFileSkillStore, LLMSkillSynthesizer, skill_to_spec
 from .swarm import (
     HeuristicSwarmComposer,
@@ -288,6 +290,29 @@ def _result_from_state(tenant_id: str, state: dict) -> RunResult:
         clarifications=state.get("clarifications") or {},
         learned_skills=state.get("learned_skills") or [],
     )
+
+
+def deliberate_task(
+    task: str,
+    *,
+    samples: int = 3,
+    offline: bool = False,
+    tenant_id: str | None = None,
+    sampling: dict[str, Any] | None = None,
+    settings: Settings | None = None,
+) -> DeliberationResult:
+    """Verified best-of-N deliberation (System 2): diverse candidates → scored → best + confidence."""
+    settings = settings or get_settings()
+    tenant_id = tenant_id or settings.tenant_id
+    init_tracing(settings)
+    enforce_budget(settings, tenant_id)
+    comp = build_components(settings, tenant_id=tenant_id, offline=offline,
+                            memory_on=False, guardrails_on=False)
+    verifier = HeuristicVerifier() if offline else LLMVerifier(comp.gateway, model=comp.planner_model)
+    return asyncio.run(deliberate(
+        task, gateway=comp.gateway, model=comp.model, verifier=verifier,
+        samples=samples, sampling=sampling,
+    ))
 
 
 def stream_task(

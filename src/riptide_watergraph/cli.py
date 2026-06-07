@@ -24,7 +24,13 @@ from .evaluation import EvalRunner
 from .gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from .graph import build_graph
 from .guardrails import default_guardrails
-from .memory import HashingEmbedding, JsonFileMemory, LexicalOverlapReranker
+from .memory import (
+    HashingEmbedding,
+    JsonFileMemory,
+    LexicalOverlapReranker,
+    RuleTripleExtractor,
+    consolidate_memory,
+)
 from .memory.reflection import LLMReflector
 from .observability.cost import (
     BudgetExceeded,
@@ -285,6 +291,26 @@ def _show_skills(tenant_id: str) -> int:
     return 0
 
 
+def _consolidate(tenant_id: str) -> int:
+    """Run the consolidation 'sleep' cycle: episodic memory -> knowledge graph + facts."""
+    settings = get_settings()
+    memory = JsonFileMemory(
+        settings.tenant_memory_path(tenant_id),
+        embedding=HashingEmbedding(),
+        reranker=LexicalOverlapReranker(),
+    )
+    report = consolidate_memory(
+        memory, extractor=RuleTripleExtractor(),
+        kg_path=settings.tenant_kg_path(tenant_id),
+    )
+    print(f" consolidated tenant={tenant_id}")
+    print(f"   scanned {report.records_scanned} records "
+          f"({report.episodic_scanned} episodic)")
+    print(f"   knowledge graph: {report.triples} facts; "
+          f"wrote {report.facts_written} semantic record(s); pruned {report.pruned}")
+    return 0
+
+
 def _run_eval(offline: bool) -> int:
     try:
         report = EvalRunner(offline=offline).run()
@@ -351,6 +377,12 @@ def main(argv: list[str] | None = None) -> int:
     skills_p.add_argument("--tenant", default="default",
                           help="Tenant id whose learned skills to list.")
 
+    consolidate_p = sub.add_parser(
+        "consolidate",
+        help="Run the memory 'sleep' cycle: distill episodic memory into a knowledge graph.")
+    consolidate_p.add_argument("--tenant", default="default",
+                               help="Tenant id whose memory to consolidate.")
+
     eval_p = sub.add_parser("eval", help="Run the evaluation suite and report metrics.")
     eval_p.add_argument("--offline", action="store_true",
                         help="Evaluate with the deterministic offline gateway.")
@@ -382,6 +414,8 @@ def main(argv: list[str] | None = None) -> int:
         return _show_costs()
     if args.command == "skills":
         return _show_skills(args.tenant)
+    if args.command == "consolidate":
+        return _consolidate(args.tenant)
     if args.command == "eval":
         return _run_eval(args.offline)
     if args.command == "serve":

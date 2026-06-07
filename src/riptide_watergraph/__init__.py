@@ -8,7 +8,7 @@ Public surface (Stage 1):
 
 from __future__ import annotations
 
-__version__ = "0.20.0"
+__version__ = "0.21.0"
 
 from .autonomy import (
     AutonomyReport,
@@ -16,6 +16,14 @@ from .autonomy import (
     Journal,
     TemplateGoalProposer,
     run_autonomous,
+)
+from .environments import (
+    Environment,
+    GuessingGameEnv,
+    Observation,
+    Rollout,
+    make_environment,
+    rollout,
 )
 from .gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from .graph import build_graph
@@ -155,4 +163,11 @@ __all__ = [
     "Goal",
     "Journal",
     "TemplateGoalProposer",
+    # environments (embodiment seam)
+    "Environment",
+    "Observation",
+    "GuessingGameEnv",
+    "Rollout",
+    "make_environment",
+    "rollout",
 ]

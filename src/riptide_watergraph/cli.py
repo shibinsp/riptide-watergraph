@@ -44,8 +44,10 @@ from .optimize import Example
 from .service import (
     deliberate_task,
     enforce_budget,
+    image_to_data_uri,
     improve_prompt,
     run_autonomous_mission,
+    vision_chat,
 )
 from .skills import JsonFileSkillStore, LLMSkillSynthesizer, skill_to_spec
 from .interfaces import SwarmComposer
@@ -326,6 +328,23 @@ def _improve(prompt: str, examples_path: str, offline: bool, candidates: int,
     return 0
 
 
+def _image_ref(arg: str) -> str:
+    """A URL/data-URI passes through; a local path is read into a data URI."""
+    if arg.startswith(("http://", "https://", "data:")):
+        return arg
+    return image_to_data_uri(arg)
+
+
+def _see(question: str, image_args: list[str], offline: bool) -> int:
+    """Multimodal: ask a question about one or more images."""
+    images = [_image_ref(a) for a in image_args]
+    answer = vision_chat(question, images, offline=offline)
+    print(f" question: {question}")
+    print(f" images:   {len(images)}")
+    print("\n ANSWER\n" + (answer or "(none)"))
+    return 0
+
+
 def _auto(mission: str, max_steps: int, offline: bool, tenant_id: str) -> int:
     """Run the bounded autonomy loop: self-set goals, executed and journaled."""
     report = run_autonomous_mission(mission, max_steps=max_steps, offline=offline,
@@ -461,6 +480,15 @@ def main(argv: list[str] | None = None) -> int:
     auto_p.add_argument("--offline", action="store_true",
                         help="Use the deterministic offline gateway + goal proposer.")
 
+    see_p = sub.add_parser(
+        "see", help="Multimodal: ask a question about one or more images (vision).")
+    see_p.add_argument("question", help="The question to ask about the image(s).")
+    see_p.add_argument("--image", action="append", default=[], required=True,
+                       metavar="PATH_OR_URL",
+                       help="An image file path, URL, or data URI (repeatable).")
+    see_p.add_argument("--offline", action="store_true",
+                       help="Use the deterministic offline (vision-aware) gateway.")
+
     eval_p = sub.add_parser("eval", help="Run the evaluation suite and report metrics.")
     eval_p.add_argument("--offline", action="store_true",
                         help="Evaluate with the deterministic offline gateway.")
@@ -500,6 +528,8 @@ def main(argv: list[str] | None = None) -> int:
         return _improve(args.prompt, args.examples, args.offline, args.candidates, args.out)
     if args.command == "auto":
         return _auto(args.mission, args.max_steps, args.offline, args.tenant)
+    if args.command == "see":
+        return _see(args.question, args.image, args.offline)
     if args.command == "eval":
         return _run_eval(args.offline)
     if args.command == "serve":

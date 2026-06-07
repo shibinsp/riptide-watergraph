@@ -518,7 +518,8 @@ the optional `[observability]` extra (OpenTelemetry + Langfuse).
 - ✅ **Cognitive memory** — a knowledge-graph semantic store + a consolidation "sleep" cycle (`riptide consolidate`) that distils episodic memory into facts the recall node surfaces.
 - ✅ **Deliberate reasoning** — verified best-of-N over diverse candidates + a calibrated confidence (`riptide deliberate`); the verifier seam that debate & tree-search build on next.
 - ✅ **Self-improvement** — measured prompt optimization (`riptide improve`): propose instruction variants, score them on examples, adopt only strict gains.
-- 🔜 **Autonomy** (gated goal loops + auto-curriculum) and **metacognition** wired into the graph (confidence-gated adaptive compute); multi-agent debate + tree-search on the verifier seam.
+- ✅ **Autonomy** — a bounded self-directed goal loop (`riptide auto`): self-set subgoals + a persistent journal + an auto-curriculum, capped by `max_steps` + the tenant budget.
+- 🧪 Research seams (experimental, optional) — multimodal perception, a Gym-like environment, reward/RL; plus multi-agent debate + tree-search on the verifier seam.
 - 🧩 Optional infra seams — `SqliteSaver` → Temporal; `JsonFileMemory` → pgvector; gateway → vLLM/SGLang; LlamaFirewall / NeMo alongside the built-in guardrails.
 
 ## 🛠️ Development

@@ -520,7 +520,8 @@ the optional `[observability]` extra (OpenTelemetry + Langfuse).
 - ✅ **Self-improvement** — measured prompt optimization (`riptide improve`): propose instruction variants, score them on examples, adopt only strict gains.
 - ✅ **Autonomy** — a bounded self-directed goal loop (`riptide auto`): self-set subgoals + a persistent journal + an auto-curriculum, capped by `max_steps` + the tenant budget.
 - ✅ **Multimodal perception** — vision: image content on `Message` (`riptide see`) through the OpenAI-compatible `/v1` endpoint.
-- 🧪 Research seams (experimental, optional) — a Gym-like environment, reward/RL; plus multi-agent debate + tree-search on the verifier seam.
+- ✅ **Environments (embodiment)** — a Gym-like `Environment` (reset/step → observation, reward, done) + a `rollout` loop (`riptide env`); the substrate for act/observe/learn.
+- 🧪 Remaining research seams — reward/RL on the environment seam; multi-agent debate + tree-search on the verifier seam.
 - 🧩 Optional infra seams — `SqliteSaver` → Temporal; `JsonFileMemory` → pgvector; gateway → vLLM/SGLang; LlamaFirewall / NeMo alongside the built-in guardrails.
 
 ## 🛠️ Development

@@ -34,6 +34,13 @@ class DemoGateway(ModelGateway):
         system = next((m.content or "" for m in messages if m.role == "system"), "")
         user = next((m.content or "" for m in messages if m.role == "user"), "")
 
+        # Vision: a deterministic, offline description when the turn carries images.
+        images = next((m.images for m in reversed(messages) if m.role == "user" and m.images), None)
+        if images:
+            return CompletionResult(
+                content=f"(offline) I can see {len(images)} image(s). "
+                        f"For '{user[:40]}', a vision model would describe their contents here.")
+
         if "You are a supervisor" in system:
             return CompletionResult(content="[]")  # offline: no corrective re-planning
 

@@ -6,6 +6,8 @@
 
 Self-learning memory · cost-aware swarm · guardrails · MCP tools · a batteries-included web Studio.
 
+**Plus an AGI-direction toolkit** — self-authored skills · knowledge-graph memory · deliberate reasoning · self-improvement · autonomy · vision · environments · reward/RL — each behind a swappable seam.
+
 [![PyPI](https://img.shields.io/pypi/v/riptide-watergraph.svg)](https://pypi.org/project/riptide-watergraph/)
 [![Python](https://img.shields.io/pypi/pyversions/riptide-watergraph.svg)](https://pypi.org/project/riptide-watergraph/)
 [![CI](https://github.com/shibinsp/riptide-watergraph/actions/workflows/ci.yml/badge.svg)](https://github.com/shibinsp/riptide-watergraph/actions/workflows/ci.yml)
@@ -43,10 +45,17 @@ gateway, memory backend, tool registry, swarm policy, or guardrails without touc
 - **MCP interop** — register tools from external Model Context Protocol servers and call them like locals.
 - **Like Water Studio** — a dependency-free, AutoGen-Studio-style web UI (chat, drag-and-drop workflow
   builder, tool/role galleries, monitoring, connections) served straight from the API.
+- An **OpenAI-compatible `/v1` API** — point any OpenAI SDK / LangChain / OpenWebUI client at the
+  agentic graph (text **and** vision).
+- An **AGI-direction toolkit** — capabilities AGI research treats as building blocks: an agent that
+  authors its own skills, a knowledge graph it grows in its "sleep", verified deliberate reasoning with a
+  confidence signal, measured self-improvement, a bounded autonomy loop, multimodal perception, Gym-like
+  environments, and a reward-driven strategy bandit. Each is off by default and swappable behind an ABC.
 
 **Who it's for:** engineers who want a production-shaped agent stack they can read, extend, and self-host
-— not a black box. **Status:** `v0.10.0` · on [PyPI](https://pypi.org/project/riptide-watergraph/) ·
-Stages 1–4 + Studio shipped · **100% test coverage** (enforced in CI) · MIT.
+— not a black box. **Status:** `v0.22.0` · on [PyPI](https://pypi.org/project/riptide-watergraph/) ·
+Stages 1–4 + Studio + the full **AGI-direction roadmap (8 tracks)** shipped · **100% test coverage**
+(610 tests, enforced in CI on Python 3.11–3.13) · MIT.
 
 ## 📋 Table of contents
 
@@ -84,6 +93,32 @@ Stages 1–4 + Studio shipped · **100% test coverage** (enforced in CI) · MIT.
 | 🖥️ | **Web Studio** | A dependency-free vanilla-JS UI (11 views) with light/dark theme, served at the API root. |
 | 🌐 | **FastAPI server** | `POST /run`, SSE `/run/stream`, multi-turn sessions, runtime connection config. |
 | 🗄️ | **Pluggable memory** | `JsonFileMemory` by default; `PgVectorMemory` (Postgres + pgvector) as a drop-in at scale. |
+
+### 🧬 Toward an AGI framework
+
+Eight capabilities AGI research treats as building blocks — each additive, **off by default**, behind a
+swappable ABC, and offline-testable at 100% coverage. (Honest framing: this is **cognitive scaffolding** for
+a base model, not a claim of general intelligence.)
+
+| | Capability | What it does | Try it |
+|---|---|---|---|
+| 🧬 | **Self-authored skills** | Distil a successful run into a verified, reusable `skill.<name>` tool — the toolset grows over time (à la Voyager). | `riptide run … --learn-skills` · `riptide skills` |
+| 🕸️ | **Cognitive memory** | A knowledge-graph semantic store + a consolidation "sleep" cycle that distils episodic memory into facts the `recall` node surfaces. | `riptide consolidate` |
+| 🌲 | **Deliberate reasoning** | Verified best-of-N over diverse reasoning candidates + a calibrated **confidence** (metacognition). | `riptide deliberate` |
+| 📈 | **Self-improvement** | Propose instruction variants, score them on labelled examples, adopt **only** strict gains (DSPy/STOP-style). | `riptide improve` |
+| 🧭 | **Autonomy** | A bounded self-directed goal loop: self-set subgoals + a persistent journal + an auto-curriculum, capped by `max_steps` + budget. | `riptide auto` |
+| 👁️ | **Multimodal perception** | Vision — image content on `Message`, threaded through the OpenAI-compatible `/v1` endpoint. | `riptide see … --image …` |
+| 🎮 | **Environments** | A Gym-like `Environment` (reset/step → observation, reward, done) + a `rollout` loop — the act/observe/learn substrate. | `riptide env guessing` |
+| 🎯 | **Reward / RL** | A `RewardModel` + a deterministic UCB bandit that learns the highest-reward strategy for a task. | `riptide rl` |
+
+Full write-ups: [Skills](https://shibinsp.github.io/riptide-watergraph/skills/) ·
+[Cognitive memory](https://shibinsp.github.io/riptide-watergraph/cognitive-memory/) ·
+[Deliberation](https://shibinsp.github.io/riptide-watergraph/deliberation/) ·
+[Self-improvement](https://shibinsp.github.io/riptide-watergraph/self-improvement/) ·
+[Autonomy](https://shibinsp.github.io/riptide-watergraph/autonomy/) ·
+[Multimodal](https://shibinsp.github.io/riptide-watergraph/multimodal/) ·
+[Environments](https://shibinsp.github.io/riptide-watergraph/environments/) ·
+[Reward/RL](https://shibinsp.github.io/riptide-watergraph/reinforcement/)
 
 ## 🚀 Install
 
@@ -264,12 +299,19 @@ Riptide-Watergraph/
     ├── swarm/                   # HeuristicSwarmComposer + cost model
     ├── guardrails/              # PII redaction, injection blocking, pipeline
     ├── mcp/                     # MCP tool interop (client, adapter, stdio)
-    ├── graph/                   # state, nodes (recall/reflect/swarm/guard), builder
+    ├── graph/                   # state, nodes (recall/reflect/swarm/guard/skill_forge), builder
+    ├── skills/                  # SkillForge — self-authored, reusable skills
+    ├── reasoning/               # deliberate reasoning — verifier + best-of-N + confidence
+    ├── optimize/                # self-improvement — measured prompt optimization
+    ├── autonomy/                # bounded goal loop + journal + auto-curriculum
+    ├── environments/            # Gym-like Environment seam + rollout
+    ├── rl/                      # reward model + UCB strategy bandit
     ├── observability/           # OTEL + Langfuse tracing + per-tenant CostTracker
-    ├── server/                  # FastAPI app + the dependency-free Studio (static/)
+    ├── server/                  # FastAPI app + the dependency-free Studio (static/) + /v1
     ├── evaluation/              # offline task suite + scoring runner
     ├── config.py                # pydantic-settings
-    └── cli.py                   # riptide run | costs | eval | serve
+    └── cli.py                   # run · costs · eval · serve · skills · consolidate ·
+                                 #   deliberate · improve · auto · see · env · rl
 ```
 
 The retrieval core (**BM25** lexical scoring + **Reciprocal Rank Fusion, k=60**) lives in

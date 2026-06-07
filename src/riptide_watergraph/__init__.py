@@ -8,7 +8,7 @@ Public surface (Stage 1):
 
 from __future__ import annotations
 
-__version__ = "0.17.0"
+__version__ = "0.18.0"
 
 from .gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from .graph import build_graph
@@ -46,6 +46,14 @@ from .memory import (
     consolidate_memory,
 )
 from .observability import CostTracker, UsageRecord
+from .optimize import (
+    Example,
+    OptimizationResult,
+    Scorer,
+    SubstringScorer,
+    TemplateProposer,
+    optimize_prompt,
+)
 from .reasoning import (
     Candidate,
     DeliberationResult,
@@ -127,4 +135,11 @@ __all__ = [
     "Verifier",
     "HeuristicVerifier",
     "LLMVerifier",
+    # self-improvement (measured prompt optimization)
+    "optimize_prompt",
+    "OptimizationResult",
+    "Example",
+    "Scorer",
+    "SubstringScorer",
+    "TemplateProposer",
 ]

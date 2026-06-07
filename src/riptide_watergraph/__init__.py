@@ -8,7 +8,7 @@ Public surface (Stage 1):
 
 from __future__ import annotations
 
-__version__ = "0.16.0"
+__version__ = "0.17.0"
 
 from .gateway import DemoGateway, LiteLLMGateway, ResilientGateway
 from .graph import build_graph
@@ -46,6 +46,15 @@ from .memory import (
     consolidate_memory,
 )
 from .observability import CostTracker, UsageRecord
+from .reasoning import (
+    Candidate,
+    DeliberationResult,
+    HeuristicVerifier,
+    LLMVerifier,
+    Verdict,
+    Verifier,
+    deliberate,
+)
 from .skills import (
     JsonFileSkillStore,
     LLMSkillSynthesizer,
@@ -110,4 +119,12 @@ __all__ = [
     "LLMSkillSynthesizer",
     "JsonFileSkillStore",
     "skill_to_spec",
+    # deliberate reasoning (verified best-of-N + confidence)
+    "deliberate",
+    "DeliberationResult",
+    "Candidate",
+    "Verdict",
+    "Verifier",
+    "HeuristicVerifier",
+    "LLMVerifier",
 ]

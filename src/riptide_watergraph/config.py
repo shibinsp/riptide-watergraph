@@ -74,6 +74,10 @@ class Settings(BaseSettings):
         """Per-tenant knowledge graph built by the consolidation 'sleep' cycle."""
         return f"{self.data_dir}/tenants/{tenant_id}/knowledge.json"
 
+    def tenant_journal_path(self, tenant_id: str) -> str:
+        """Per-tenant journal of autonomous work (the autonomy loop's record)."""
+        return f"{self.data_dir}/tenants/{tenant_id}/journal.json"
+
     @property
     def usage_log_path(self) -> str:
         return f"{self.data_dir}/usage.jsonl"

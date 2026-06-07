@@ -66,6 +66,10 @@ class Settings(BaseSettings):
         """Per-tenant memory namespace so lessons never leak across tenants."""
         return f"{self.data_dir}/tenants/{tenant_id}/memory.json"
 
+    def tenant_skills_dir(self, tenant_id: str) -> str:
+        """Per-tenant SkillForge store so learned skills never leak across tenants."""
+        return f"{self.data_dir}/tenants/{tenant_id}/skills"
+
     @property
     def usage_log_path(self) -> str:
         return f"{self.data_dir}/usage.jsonl"
